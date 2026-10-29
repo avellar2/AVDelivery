@@ -1,0 +1,38 @@
+"use client";
+
+import { useActionState } from "react";
+
+import { Alert } from "@/components/ui/alert";
+import { FormField } from "@/components/ui/form-field";
+import { Input } from "@/components/ui/input";
+import { SubmitButton } from "@/components/ui/submit-button";
+import { initialActionState } from "@/lib/action-state";
+import { requestPasswordResetAction } from "@/modules/auth/actions";
+
+export function ForgotPasswordForm() {
+  const [state, formAction] = useActionState(requestPasswordResetAction, initialActionState);
+
+  return (
+    <form action={formAction} className="space-y-4">
+      {state.message ? (
+        <Alert variant={state.status === "success" ? "success" : "error"}>{state.message}</Alert>
+      ) : null}
+
+      <FormField label="E-mail" htmlFor="email" error={state.fieldErrors?.email?.[0]}>
+        <Input
+          id="email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          placeholder="voce@empresa.com"
+          aria-invalid={Boolean(state.fieldErrors?.email)}
+          required
+        />
+      </FormField>
+
+      <SubmitButton className="w-full" pendingLabel="Enviando...">
+        Enviar link de recuperação
+      </SubmitButton>
+    </form>
+  );
+}
