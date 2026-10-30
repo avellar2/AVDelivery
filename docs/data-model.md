@@ -52,12 +52,12 @@ create type public.order_payment_method as enum ('pix', 'cash', 'card_on_deliver
 create type public.order_payment_status as enum ('pending', 'paid', 'canceled');
 ```
 
-| Papel      | Uso nesta etapa                                                   |
-| ---------- | ----------------------------------------------------------------- |
-| `owner`    | configurações, status da loja, gestão de vínculos, pedidos e pagamento |
+| Papel      | Uso nesta etapa                                                                    |
+| ---------- | ---------------------------------------------------------------------------------- |
+| `owner`    | configurações, status da loja, gestão de vínculos, pedidos e pagamento             |
 | `manager`  | configurações, cardápio, pedidos e pagamento; não altera status da loja nem papéis |
-| `employee` | opera pedidos e lê o cardápio; não cancela nem altera pagamento   |
-| `driver`   | reservado para entregas; sem acesso a pedidos nesta etapa         |
+| `employee` | opera pedidos e lê o cardápio; não cancela nem altera pagamento                    |
+| `driver`   | reservado para entregas; sem acesso a pedidos nesta etapa                          |
 
 ## Tabelas
 
@@ -80,24 +80,24 @@ O nome vem de `raw_user_meta_data->>'name'` apenas para exibição. Metadados ed
 
 O estabelecimento é o tenant do sistema.
 
-| Coluna        | Tipo          | Regras                                                  |
-| ------------- | ------------- | ------------------------------------------------------- |
-| `id`          | `uuid`        | PK, `default gen_random_uuid()`                         |
-| `name`        | `text`        | `not null`, 2 a 120 caracteres                          |
-| `slug`        | `text`        | `not null`, único, 3 a 80, `^[a-z0-9]+(?:-[a-z0-9]+)*$` |
-| `description` | `text`        | opcional, até 500 caracteres                            |
-| `phone`       | `text`        | opcional, até 30 caracteres                             |
-| `logo_url`    | `text`        | opcional, até 500 caracteres                            |
-| `active`      | `boolean`     | `not null default true`                                 |
-| `accepting_orders` | `boolean` | `not null default true`                                |
-| `delivery_enabled` | `boolean` | `not null default true`                                |
-| `pickup_enabled`   | `boolean` | `not null default true`                                |
-| `delivery_fee_cents` | `bigint` | `not null default 0`, 0 a 1.000.000                    |
-| `min_order_cents`  | `bigint`  | `not null default 0`, 0 a 10.000.000                   |
-| `payment_pix_enabled` / `payment_cash_enabled` / `payment_card_on_delivery_enabled` | `boolean` | `not null`, padrões `false`/`true`/`false` |
-| `pix_key` / `pix_receiver_name` | `text` | opcionais, até 200/120 caracteres                   |
-| `created_at`  | `timestamptz` | `not null default now()`                                |
-| `updated_at`  | `timestamptz` | `not null default now()`                                |
+| Coluna                                                                              | Tipo          | Regras                                                  |
+| ----------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------- |
+| `id`                                                                                | `uuid`        | PK, `default gen_random_uuid()`                         |
+| `name`                                                                              | `text`        | `not null`, 2 a 120 caracteres                          |
+| `slug`                                                                              | `text`        | `not null`, único, 3 a 80, `^[a-z0-9]+(?:-[a-z0-9]+)*$` |
+| `description`                                                                       | `text`        | opcional, até 500 caracteres                            |
+| `phone`                                                                             | `text`        | opcional, até 30 caracteres                             |
+| `logo_url`                                                                          | `text`        | opcional, até 500 caracteres                            |
+| `active`                                                                            | `boolean`     | `not null default true`                                 |
+| `accepting_orders`                                                                  | `boolean`     | `not null default true`                                 |
+| `delivery_enabled`                                                                  | `boolean`     | `not null default true`                                 |
+| `pickup_enabled`                                                                    | `boolean`     | `not null default true`                                 |
+| `delivery_fee_cents`                                                                | `bigint`      | `not null default 0`, 0 a 1.000.000                     |
+| `min_order_cents`                                                                   | `bigint`      | `not null default 0`, 0 a 10.000.000                    |
+| `payment_pix_enabled` / `payment_cash_enabled` / `payment_card_on_delivery_enabled` | `boolean`     | `not null`, padrões `false`/`true`/`false`              |
+| `pix_key` / `pix_receiver_name`                                                     | `text`        | opcionais, até 200/120 caracteres                       |
+| `created_at`                                                                        | `timestamptz` | `not null default now()`                                |
+| `updated_at`                                                                        | `timestamptz` | `not null default now()`                                |
 
 `active = false` é desativação lógica: a loja deixa de aparecer publicamente e não é apagada.
 `accepting_orders = false` pausa somente novos pedidos; a loja e o cardápio continuam visíveis.
@@ -222,14 +222,14 @@ FK composta `(store_id, option_group_id) → option_groups(store_id, id)` com `o
 
 Cliente final da loja. Não é usuário administrativo e não faz login.
 
-| Coluna       | Tipo          | Regras                                                  |
-| ------------ | ------------- | ------------------------------------------------------- |
-| `id`         | `uuid`        | PK, `default gen_random_uuid()`                         |
-| `store_id`   | `uuid`        | `not null`, FK `stores(id)` `on delete restrict`        |
-| `name`       | `text`        | `not null`, 2 a 120 caracteres (após `btrim`)           |
-| `phone`      | `text`        | `not null`, 10 a 15 dígitos                             |
-| `created_at` | `timestamptz` | `not null default now()`                                |
-| `updated_at` | `timestamptz` | `not null default now()`                                |
+| Coluna       | Tipo          | Regras                                           |
+| ------------ | ------------- | ------------------------------------------------ |
+| `id`         | `uuid`        | PK, `default gen_random_uuid()`                  |
+| `store_id`   | `uuid`        | `not null`, FK `stores(id)` `on delete restrict` |
+| `name`       | `text`        | `not null`, 2 a 120 caracteres (após `btrim`)    |
+| `phone`      | `text`        | `not null`, 10 a 15 dígitos                      |
+| `created_at` | `timestamptz` | `not null default now()`                         |
+| `updated_at` | `timestamptz` | `not null default now()`                         |
 
 - `unique (store_id, phone)` — um cadastro por telefone em cada loja; o checkout faz upsert.
 - `unique (store_id, id)` habilita a FK composta usada por `orders`.
@@ -239,26 +239,26 @@ Cliente final da loja. Não é usuário administrativo e não faz login.
 Pedido com snapshot comercial. Escrito apenas pela RPC `create_order`; status e pagamento mudam
 apenas pelas RPCs de operação.
 
-| Coluna                     | Tipo                        | Regras                                              |
-| -------------------------- | --------------------------- | --------------------------------------------------- |
-| `id`                       | `uuid`                      | PK, `default gen_random_uuid()`                     |
-| `store_id`                 | `uuid`                      | `not null`, FK `stores(id)` `on delete restrict`    |
-| `customer_id`              | `uuid`                      | opcional; FK composta `(store_id, customer_id)` com `on delete set null (customer_id)` |
-| `order_number`             | `bigint`                    | `not null`, `> 0`, sequencial por loja              |
-| `customer_name` / `customer_phone` | `text`              | snapshots; mesmas regras de `customers`             |
-| `fulfillment_type`         | `order_fulfillment_type`    | `delivery` ou `pickup`                              |
-| `delivery_address_snapshot`| `jsonb`                     | obrigatório no delivery, nulo no pickup; contém `street`, `number`, `complement`, `district`, `city`, `reference`, `postalCode` |
-| `payment_method`           | `order_payment_method`      | `pix`, `cash`, `card_on_delivery`                   |
-| `payment_status`           | `order_payment_status`      | `pending`, `paid`, `canceled`                       |
-| `status`                   | `order_status`              | `pending`, `accepted`, `preparing`, `ready`, `out_for_delivery`, `delivered`, `canceled` |
-| `subtotal_cents`           | `bigint`                    | `>= 0`                                              |
-| `delivery_fee_cents`       | `bigint`                    | `>= 0`; zero no pickup                              |
-| `total_cents`              | `bigint`                    | `= subtotal + taxa` (constraint)                    |
-| `notes`                    | `text`                      | opcional, até 500                                   |
-| `idempotency_key`          | `text`                      | 8 a 100; único por loja                             |
-| `request_hash`             | `text`                      | SHA-256 hex do payload canonicalizado               |
-| `tracking_token_hash`      | `text`                      | SHA-256 hex; único por loja                         |
-| `created_at` / `updated_at`| `timestamptz`               | `not null default now()`                            |
+| Coluna                             | Tipo                     | Regras                                                                                                                          |
+| ---------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                               | `uuid`                   | PK, `default gen_random_uuid()`                                                                                                 |
+| `store_id`                         | `uuid`                   | `not null`, FK `stores(id)` `on delete restrict`                                                                                |
+| `customer_id`                      | `uuid`                   | opcional; FK composta `(store_id, customer_id)` com `on delete set null (customer_id)`                                          |
+| `order_number`                     | `bigint`                 | `not null`, `> 0`, sequencial por loja                                                                                          |
+| `customer_name` / `customer_phone` | `text`                   | snapshots; mesmas regras de `customers`                                                                                         |
+| `fulfillment_type`                 | `order_fulfillment_type` | `delivery` ou `pickup`                                                                                                          |
+| `delivery_address_snapshot`        | `jsonb`                  | obrigatório no delivery, nulo no pickup; contém `street`, `number`, `complement`, `district`, `city`, `reference`, `postalCode` |
+| `payment_method`                   | `order_payment_method`   | `pix`, `cash`, `card_on_delivery`                                                                                               |
+| `payment_status`                   | `order_payment_status`   | `pending`, `paid`, `canceled`                                                                                                   |
+| `status`                           | `order_status`           | `pending`, `accepted`, `preparing`, `ready`, `out_for_delivery`, `delivered`, `canceled`                                        |
+| `subtotal_cents`                   | `bigint`                 | `>= 0`                                                                                                                          |
+| `delivery_fee_cents`               | `bigint`                 | `>= 0`; zero no pickup                                                                                                          |
+| `total_cents`                      | `bigint`                 | `= subtotal + taxa` (constraint)                                                                                                |
+| `notes`                            | `text`                   | opcional, até 500                                                                                                               |
+| `idempotency_key`                  | `text`                   | 8 a 100; único por loja                                                                                                         |
+| `request_hash`                     | `text`                   | SHA-256 hex do payload canonicalizado                                                                                           |
+| `tracking_token_hash`              | `text`                   | SHA-256 hex; único por loja                                                                                                     |
+| `created_at` / `updated_at`        | `timestamptz`            | `not null default now()`                                                                                                        |
 
 - `unique (store_id, order_number)`, `unique (store_id, idempotency_key)`,
   `unique (store_id, tracking_token_hash)` e `unique (store_id, id)`.
@@ -270,46 +270,46 @@ apenas pelas RPCs de operação.
 
 Itens do pedido com snapshot de nome e preço.
 
-| Coluna                 | Tipo      | Regras                                          |
-| ---------------------- | --------- | ----------------------------------------------- |
-| `id`                   | `uuid`    | PK, `default gen_random_uuid()`                 |
-| `store_id`             | `uuid`    | `not null`, FK `stores(id)` `on delete restrict`|
-| `order_id`             | `uuid`    | FK composta `(store_id, order_id)` `on delete cascade` |
-| `product_id`           | `uuid`    | opcional, `on delete set null`                  |
-| `product_name_snapshot`| `text`    | 1 a 160 caracteres                              |
-| `unit_price_cents`     | `bigint`  | 0 a 50.000.000                                  |
-| `quantity`             | `integer` | 1 a 99                                          |
-| `total_cents`          | `bigint`  | `= unitário × quantidade`                       |
-| `notes`                | `text`    | opcional, até 300                               |
+| Coluna                  | Tipo      | Regras                                                 |
+| ----------------------- | --------- | ------------------------------------------------------ |
+| `id`                    | `uuid`    | PK, `default gen_random_uuid()`                        |
+| `store_id`              | `uuid`    | `not null`, FK `stores(id)` `on delete restrict`       |
+| `order_id`              | `uuid`    | FK composta `(store_id, order_id)` `on delete cascade` |
+| `product_id`            | `uuid`    | opcional, `on delete set null`                         |
+| `product_name_snapshot` | `text`    | 1 a 160 caracteres                                     |
+| `unit_price_cents`      | `bigint`  | 0 a 50.000.000                                         |
+| `quantity`              | `integer` | 1 a 99                                                 |
+| `total_cents`           | `bigint`  | `= unitário × quantidade`                              |
+| `notes`                 | `text`    | opcional, até 300                                      |
 
 ### `order_item_options`
 
 Adicionais com snapshot de grupo, nome e preço.
 
-| Coluna                       | Tipo      | Regras                                          |
-| ---------------------------- | --------- | ----------------------------------------------- |
-| `id`                         | `uuid`    | PK, `default gen_random_uuid()`                 |
-| `store_id`                   | `uuid`    | `not null`, FK `stores(id)` `on delete restrict`|
+| Coluna                       | Tipo      | Regras                                                      |
+| ---------------------------- | --------- | ----------------------------------------------------------- |
+| `id`                         | `uuid`    | PK, `default gen_random_uuid()`                             |
+| `store_id`                   | `uuid`    | `not null`, FK `stores(id)` `on delete restrict`            |
 | `order_item_id`              | `uuid`    | FK composta `(store_id, order_item_id)` `on delete cascade` |
-| `option_id`                  | `uuid`    | opcional, `on delete set null`                  |
-| `option_group_name_snapshot` | `text`    | 1 a 120 caracteres                              |
-| `option_name_snapshot`       | `text`    | 1 a 120 caracteres                              |
-| `additional_price_cents`     | `bigint`  | 0 a 1.000.000                                   |
-| `quantity`                   | `integer` | 1 a 99                                          |
+| `option_id`                  | `uuid`    | opcional, `on delete set null`                              |
+| `option_group_name_snapshot` | `text`    | 1 a 120 caracteres                                          |
+| `option_name_snapshot`       | `text`    | 1 a 120 caracteres                                          |
+| `additional_price_cents`     | `bigint`  | 0 a 1.000.000                                               |
+| `quantity`                   | `integer` | 1 a 99                                                      |
 
 ### `order_events`
 
 Histórico imutável de status.
 
-| Coluna            | Tipo           | Regras                                          |
-| ----------------- | -------------- | ----------------------------------------------- |
-| `id`              | `uuid`         | PK, `default gen_random_uuid()`                 |
-| `store_id`        | `uuid`         | `not null`, FK `stores(id)` `on delete restrict`|
-| `order_id`        | `uuid`         | FK composta `(store_id, order_id)` `on delete cascade` |
-| `previous_status` | `order_status` | nulo no evento inicial                          |
-| `new_status`      | `order_status` | `not null`                                      |
+| Coluna            | Tipo           | Regras                                                            |
+| ----------------- | -------------- | ----------------------------------------------------------------- |
+| `id`              | `uuid`         | PK, `default gen_random_uuid()`                                   |
+| `store_id`        | `uuid`         | `not null`, FK `stores(id)` `on delete restrict`                  |
+| `order_id`        | `uuid`         | FK composta `(store_id, order_id)` `on delete cascade`            |
+| `previous_status` | `order_status` | nulo no evento inicial                                            |
+| `new_status`      | `order_status` | `not null`                                                        |
 | `actor_id`        | `uuid`         | FK `auth.users(id)` `on delete set null`; nulo na criação pública |
-| `created_at`      | `timestamptz`  | `not null default now()`                        |
+| `created_at`      | `timestamptz`  | `not null default now()`                                          |
 
 ### Migrações da Etapa 3
 
@@ -327,50 +327,50 @@ Histórico imutável de status.
 
 ## Índices
 
-| Índice                                      | Tabela                  | Motivo                                   |
-| ------------------------------------------- | ----------------------- | ---------------------------------------- |
-| `stores_slug_key` (unique)                  | `stores`                | busca pública por slug e unicidade       |
-| `stores_active_idx`                         | `stores`                | filtro de lojas ativas na página pública |
-| `store_memberships_store_user_key` (unique) | `store_memberships`     | unicidade do vínculo                     |
-| `store_memberships_user_id_idx`             | `store_memberships`     | listar lojas de um usuário               |
-| `categories_store_sort_idx`                 | `categories`            | ordenação por loja                       |
-| `categories_store_active_idx`               | `categories`            | filtro público/gestão                    |
-| `products_store_category_sort_idx`          | `products`              | listagem por categoria                   |
-| `products_store_available_idx`              | `products`              | filtro público                           |
-| `option_groups_store_active_idx`            | `option_groups`         | filtro público                           |
-| `product_option_groups_store_idx`           | `product_option_groups` | gestão por loja                          |
-| `product_option_groups_group_idx`           | `product_option_groups` | associações por grupo                    |
-| `product_options_store_group_sort_idx`      | `product_options`       | opções por grupo                         |
-| `product_options_store_available_idx`       | `product_options`       | filtro público                           |
-| `customers_store_phone_idx`                 | `customers`             | busca/upsert por telefone                |
-| `orders_store_status_created_idx`           | `orders`                | fila por status e data                   |
-| `orders_store_created_idx`                  | `orders`                | listagem por loja                        |
-| `orders_store_phone_created_idx`            | `orders`                | rate limit por telefone                  |
-| `order_items_order_idx` / `order_items_store_idx` | `order_items`     | itens por pedido e por loja              |
-| `order_item_options_item_idx` / `_store_idx`| `order_item_options`    | adicionais por item e por loja           |
-| `order_events_order_created_idx` / `_store_created_idx` | `order_events` | histórico por pedido e por loja |
+| Índice                                                  | Tabela                  | Motivo                                   |
+| ------------------------------------------------------- | ----------------------- | ---------------------------------------- |
+| `stores_slug_key` (unique)                              | `stores`                | busca pública por slug e unicidade       |
+| `stores_active_idx`                                     | `stores`                | filtro de lojas ativas na página pública |
+| `store_memberships_store_user_key` (unique)             | `store_memberships`     | unicidade do vínculo                     |
+| `store_memberships_user_id_idx`                         | `store_memberships`     | listar lojas de um usuário               |
+| `categories_store_sort_idx`                             | `categories`            | ordenação por loja                       |
+| `categories_store_active_idx`                           | `categories`            | filtro público/gestão                    |
+| `products_store_category_sort_idx`                      | `products`              | listagem por categoria                   |
+| `products_store_available_idx`                          | `products`              | filtro público                           |
+| `option_groups_store_active_idx`                        | `option_groups`         | filtro público                           |
+| `product_option_groups_store_idx`                       | `product_option_groups` | gestão por loja                          |
+| `product_option_groups_group_idx`                       | `product_option_groups` | associações por grupo                    |
+| `product_options_store_group_sort_idx`                  | `product_options`       | opções por grupo                         |
+| `product_options_store_available_idx`                   | `product_options`       | filtro público                           |
+| `customers_store_phone_idx`                             | `customers`             | busca/upsert por telefone                |
+| `orders_store_status_created_idx`                       | `orders`                | fila por status e data                   |
+| `orders_store_created_idx`                              | `orders`                | listagem por loja                        |
+| `orders_store_phone_created_idx`                        | `orders`                | rate limit por telefone                  |
+| `order_items_order_idx` / `order_items_store_idx`       | `order_items`           | itens por pedido e por loja              |
+| `order_item_options_item_idx` / `_store_idx`            | `order_item_options`    | adicionais por item e por loja           |
+| `order_events_order_created_idx` / `_store_created_idx` | `order_events`          | histórico por pedido e por loja          |
 
 ## Funções e triggers
 
-| Objeto                                 | Tipo                                           | Função                                                                                    |
-| -------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `set_updated_at()`                     | trigger                                        | atualiza `updated_at` em `profiles`, `stores`, `categories`, `products` e `option_groups` |
-| `handle_new_user()`                    | trigger `security definer`                     | cria `profiles` ao inserir em `auth.users`                                                |
-| `private.is_platform_admin()`          | função `security definer`                      | testa o vínculo do usuário atual em `platform_admins`                                     |
-| `private.is_store_member(uuid)`        | função `security definer`                      | testa vínculo do usuário atual com a loja                                                 |
-| `private.has_store_role(uuid, role[])` | função `security definer`                      | testa vínculo com um dos papéis                                                           |
-| `private.prevent_store_id_change()`    | trigger                                        | impede alterar `store_id` nas tabelas do cardápio                                         |
-| `private.storage_store_id(text)`       | função `stable`                                | extrai o `store_id` do caminho do Storage                                                 |
-| `prevent_membership_identity_change()` | trigger                                        | impede alterar `store_id`/`user_id`                                                       |
-| `ensure_store_has_owner()`             | constraint trigger diferido `security definer` | impede remover o último `owner` de uma loja existente                                     |
-| `protect_store_active_flag()`          | trigger                                        | apenas `owner` (ou admin) altera `active`                                                 |
-| `private.guard_order_update()`         | trigger                                        | congela dados comerciais do pedido; só status/pagamento mudam                             |
-| `private.guard_order_child_insert()`   | trigger                                        | impede item com `store_id` diferente do pedido                                            |
-| `private.guard_order_event_insert()`   | trigger                                        | impede evento com `store_id` diferente do pedido                                          |
-| `public.create_order(...)`             | RPC `security definer`                         | checkout transacional: valida, recalcula preços, grava cliente/pedido/itens/evento        |
-| `public.get_order_tracking(...)`       | RPC `security definer stable`                  | consulta pública por slug + número + hash do token                                        |
-| `public.update_order_status(...)`      | RPC `security definer`                         | valida papel, transição e concorrência; grava evento                                      |
-| `public.update_order_payment_status(...)` | RPC `security definer`                      | altera somente o pagamento, com transições próprias                                       |
+| Objeto                                    | Tipo                                           | Função                                                                                    |
+| ----------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `set_updated_at()`                        | trigger                                        | atualiza `updated_at` em `profiles`, `stores`, `categories`, `products` e `option_groups` |
+| `handle_new_user()`                       | trigger `security definer`                     | cria `profiles` ao inserir em `auth.users`                                                |
+| `private.is_platform_admin()`             | função `security definer`                      | testa o vínculo do usuário atual em `platform_admins`                                     |
+| `private.is_store_member(uuid)`           | função `security definer`                      | testa vínculo do usuário atual com a loja                                                 |
+| `private.has_store_role(uuid, role[])`    | função `security definer`                      | testa vínculo com um dos papéis                                                           |
+| `private.prevent_store_id_change()`       | trigger                                        | impede alterar `store_id` nas tabelas do cardápio                                         |
+| `private.storage_store_id(text)`          | função `stable`                                | extrai o `store_id` do caminho do Storage                                                 |
+| `prevent_membership_identity_change()`    | trigger                                        | impede alterar `store_id`/`user_id`                                                       |
+| `ensure_store_has_owner()`                | constraint trigger diferido `security definer` | impede remover o último `owner` de uma loja existente                                     |
+| `protect_store_active_flag()`             | trigger                                        | apenas `owner` (ou admin) altera `active`                                                 |
+| `private.guard_order_update()`            | trigger                                        | congela dados comerciais do pedido; só status/pagamento mudam                             |
+| `private.guard_order_child_insert()`      | trigger                                        | impede item com `store_id` diferente do pedido                                            |
+| `private.guard_order_event_insert()`      | trigger                                        | impede evento com `store_id` diferente do pedido                                          |
+| `public.create_order(...)`                | RPC `security definer`                         | checkout transacional: valida, recalcula preços, grava cliente/pedido/itens/evento        |
+| `public.get_order_tracking(...)`          | RPC `security definer stable`                  | consulta pública por slug + número + hash do token                                        |
+| `public.update_order_status(...)`         | RPC `security definer`                         | valida papel, transição e concorrência; grava evento                                      |
+| `public.update_order_payment_status(...)` | RPC `security definer`                         | altera somente o pagamento, com transições próprias                                       |
 
 As três funções de autorização ficam no schema **`private`**, não exposto pela Data API. A migração
 `20261029120000_move_security_helpers_to_private.sql` moveu as funções e atualizou políticas e
@@ -391,22 +391,22 @@ O disparo interno de triggers não depende desse privilégio.
 
 ## Permissões por coluna (resumo)
 
-| Tabela                  | `anon`   | `authenticated`                                                         |
-| ----------------------- | -------- | ----------------------------------------------------------------------- |
-| `profiles`              | —        | `select (id, name)`, `update (name)`                                    |
+| Tabela                  | `anon`   | `authenticated`                                                                       |
+| ----------------------- | -------- | ------------------------------------------------------------------------------------- |
+| `profiles`              | —        | `select (id, name)`, `update (name)`                                                  |
 | `stores`                | `select` | `select`, `update (name, description, phone, logo_url, active + colunas de checkout)` |
-| `store_memberships`     | —        | `select`, `insert (store_id, user_id, role)`, `update (role)`, `delete` |
-| `platform_admins`       | —        | `select` (apenas a própria linha)                                       |
-| `categories`            | `select` | `select`, `insert/update` de campos de conteúdo, `delete`               |
-| `products`              | `select` | `select`, `insert/update`; sem `delete` (arquivamento)                  |
-| `option_groups`         | `select` | `select`, `insert/update`, `delete`                                     |
-| `product_option_groups` | `select` | `select`, `insert`, `update (sort_order)`, `delete`                     |
-| `product_options`       | `select` | `select`, `insert/update`, `delete`                                     |
-| `customers`             | —        | `select` (owner/manager/employee do tenant)                             |
-| `orders`                | —        | `select` (owner/manager/employee do tenant)                             |
-| `order_items`           | —        | `select` (owner/manager/employee do tenant)                             |
-| `order_item_options`    | —        | `select` (owner/manager/employee do tenant)                             |
-| `order_events`          | —        | `select` (owner/manager/employee do tenant)                             |
+| `store_memberships`     | —        | `select`, `insert (store_id, user_id, role)`, `update (role)`, `delete`               |
+| `platform_admins`       | —        | `select` (apenas a própria linha)                                                     |
+| `categories`            | `select` | `select`, `insert/update` de campos de conteúdo, `delete`                             |
+| `products`              | `select` | `select`, `insert/update`; sem `delete` (arquivamento)                                |
+| `option_groups`         | `select` | `select`, `insert/update`, `delete`                                                   |
+| `product_option_groups` | `select` | `select`, `insert`, `update (sort_order)`, `delete`                                   |
+| `product_options`       | `select` | `select`, `insert/update`, `delete`                                                   |
+| `customers`             | —        | `select` (owner/manager/employee do tenant)                                           |
+| `orders`                | —        | `select` (owner/manager/employee do tenant)                                           |
+| `order_items`           | —        | `select` (owner/manager/employee do tenant)                                           |
+| `order_item_options`    | —        | `select` (owner/manager/employee do tenant)                                           |
+| `order_events`          | —        | `select` (owner/manager/employee do tenant)                                           |
 
 Nas tabelas do cardápio, as políticas de escrita exigem `owner`/`manager` (ou
 `platform_admin`); `employee` e `driver` têm somente leitura. `store_id` não está nos grants de

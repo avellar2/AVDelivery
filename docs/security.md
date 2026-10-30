@@ -14,12 +14,12 @@
 | Erro interno exposto ao usuário                                | `AppError` com mensagem pública e log apenas da mensagem             |
 | Sessão fixada / tokens no browser                              | cookies `httpOnly` do `@supabase/ssr`; auth somente server-side      |
 
-| Cliente adulterar preço/total no checkout                  | RPC recalcula tudo a partir do catálogo; valores do browser são ignorados |
-| Pedido duplicado por duplo clique/retentativa              | chave de idempotência + hash + advisory lock + unique por loja       |
-| Loja A ler/operar pedidos da Loja B                        | RLS por vínculo + RPCs com `has_store_role` + testes                 |
-| Consulta arbitrária de pedido por ID/número                | token de 32 bytes; banco guarda só SHA-256; busca exige slug + número + hash |
-| Vazamento do token por referer/log/analytics               | token no fragmento da URL, lido no cliente; sem logs e com noindex   |
-| Abuso de checkout                                         | rate limit por IP/loja + limites por telefone no banco               |
+| Cliente adulterar preço/total no checkout | RPC recalcula tudo a partir do catálogo; valores do browser são ignorados |
+| Pedido duplicado por duplo clique/retentativa | chave de idempotência + hash + advisory lock + unique por loja |
+| Loja A ler/operar pedidos da Loja B | RLS por vínculo + RPCs com `has_store_role` + testes |
+| Consulta arbitrária de pedido por ID/número | token de 32 bytes; banco guarda só SHA-256; busca exige slug + número + hash |
+| Vazamento do token por referer/log/analytics | token no fragmento da URL, lido no cliente; sem logs e com noindex |
+| Abuso de checkout | rate limit por IP/loja + limites por telefone no banco |
 
 ## Fronteiras de confiança
 
@@ -147,13 +147,13 @@ RLS habilitado em `categories`, `products`, `option_groups`, `product_option_gro
 RLS habilitado em `customers`, `orders`, `order_items`, `order_item_options` e `order_events`.
 Nenhuma dessas tabelas tem grant de escrita para `anon` ou `authenticated`.
 
-| Tabela               | Leitura pública | Leitura autenticada                     | Escrita                     |
-| -------------------- | --------------- | --------------------------------------- | --------------------------- |
-| `customers`          | —               | owner/manager/employee do tenant ou admin | somente RPC `create_order` |
-| `orders`             | —               | idem                                    | RPC de criação/status/pagamento |
-| `order_items`        | —               | idem                                    | RPC `create_order`          |
-| `order_item_options` | —               | idem                                    | RPC `create_order`          |
-| `order_events`       | —               | idem                                    | RPCs de status              |
+| Tabela               | Leitura pública | Leitura autenticada                       | Escrita                         |
+| -------------------- | --------------- | ----------------------------------------- | ------------------------------- |
+| `customers`          | —               | owner/manager/employee do tenant ou admin | somente RPC `create_order`      |
+| `orders`             | —               | idem                                      | RPC de criação/status/pagamento |
+| `order_items`        | —               | idem                                      | RPC `create_order`              |
+| `order_item_options` | —               | idem                                      | RPC `create_order`              |
+| `order_events`       | —               | idem                                      | RPCs de status                  |
 
 - As políticas usam `private.has_store_role(store_id, ['owner','manager','employee'])` ou
   `private.is_platform_admin()`.
