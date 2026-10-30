@@ -4,15 +4,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonClassName } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { canManageMenu, canManageSettings, roleLabel } from "@/modules/memberships/roles";
+import {
+  canManageMenu,
+  canManageSettings,
+  canOperateOrders,
+  roleLabel,
+} from "@/modules/memberships/roles";
+import { countOrdersByStatus } from "@/modules/orders/service";
 import { getDashboardContext } from "@/modules/stores/active-store";
 import { selectStoreAction } from "@/modules/stores/actions";
 
 const upcomingModules = [
-  {
-    title: "Pedidos",
-    description: "Fila de pedidos e acompanhamento da operação.",
-  },
   {
     title: "Entregas",
     description: "Gestão de entregadores e rotas de entrega.",
@@ -87,6 +89,15 @@ export default async function DashboardPage() {
   const membership = access.membership;
   const canManage = canManageSettings(membership.role);
   const canManageProducts = canManageMenu(membership.role);
+  const canOperate = canOperateOrders(membership.role);
+  const orderCounts = canOperate ? await countOrdersByStatus(membership.storeId) : null;
+  const activeOrders = orderCounts
+    ? orderCounts.pending +
+      orderCounts.accepted +
+      orderCounts.preparing +
+      orderCounts.ready +
+      orderCounts.out_for_delivery
+    : 0;
 
   return (
     <div className="space-y-8">
@@ -157,7 +168,7 @@ export default async function DashboardPage() {
           <div>
             <h2 className="text-lg font-semibold">Módulos da operação</h2>
             <p className="text-sm text-zinc-500">
-              Cardápio disponível; os demais módulos chegam nas próximas etapas.
+              Cardápio e pedidos disponíveis; os demais módulos chegam nas próximas etapas.
             </p>
           </div>
         </div>
@@ -176,6 +187,28 @@ export default async function DashboardPage() {
                   className="inline-flex text-sm font-medium text-orange-700 hover:text-orange-800"
                 >
                   Gerenciar cardápio
+                </Link>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {canOperate ? (
+            <Card>
+              <CardContent className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-zinc-900">Pedidos</h3>
+                  <Badge variant={activeOrders > 0 ? "warning" : "success"}>
+                    {activeOrders > 0 ? `${activeOrders} em andamento` : "Disponível"}
+                  </Badge>
+                </div>
+                <p className="text-sm text-zinc-500">
+                  Fila da loja, status, pagamento e retiradas.
+                </p>
+                <Link
+                  href="/dashboard/pedidos"
+                  className="inline-flex text-sm font-medium text-orange-700 hover:text-orange-800"
+                >
+                  Abrir fila de pedidos
                 </Link>
               </CardContent>
             </Card>

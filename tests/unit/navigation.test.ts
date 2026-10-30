@@ -27,10 +27,28 @@ describe("navegação do cardápio", () => {
     }
   });
 
+  it("libera pedidos para proprietário, gerente e funcionário", () => {
+    for (const role of ["owner", "manager", "employee"] as const) {
+      const orders = getDashboardNavItems(role).find((item) => item.key === "orders");
+
+      expect(orders).toMatchObject({
+        href: "/dashboard/pedidos",
+        available: true,
+        locked: false,
+      });
+    }
+  });
+
+  it("bloqueia pedidos para entregador", () => {
+    const orders = getDashboardNavItems("driver").find((item) => item.key === "orders");
+
+    expect(orders).toMatchObject({ href: null, available: false, locked: true });
+  });
+
   it("mantém módulos futuros como em breve", () => {
     const items = getDashboardNavItems("owner");
 
-    for (const key of ["orders", "deliveries", "staff"] as const) {
+    for (const key of ["deliveries", "staff"] as const) {
       const item = items.find((entry) => entry.key === key);
       expect(item).toMatchObject({ href: null, available: false });
       expect(item?.locked).toBeUndefined();

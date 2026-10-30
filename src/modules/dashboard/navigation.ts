@@ -1,4 +1,4 @@
-import { canManageMenu, canManageSettings } from "@/modules/memberships/roles";
+import { canManageMenu, canManageSettings, canOperateOrders } from "@/modules/memberships/roles";
 import type { StoreMemberRole } from "@/types/database";
 
 export type DashboardNavItem = {
@@ -13,6 +13,7 @@ export type DashboardNavItem = {
 export function getDashboardNavItems(role: StoreMemberRole | null): DashboardNavItem[] {
   const canManage = role ? canManageSettings(role) : false;
   const canManageProducts = role ? canManageMenu(role) : false;
+  const canOperate = role ? canOperateOrders(role) : false;
 
   return [
     {
@@ -33,9 +34,10 @@ export function getDashboardNavItems(role: StoreMemberRole | null): DashboardNav
     {
       key: "orders",
       label: "Pedidos",
-      href: null,
-      available: false,
-      description: "Acompanhamento em tempo real",
+      href: canOperate ? "/dashboard/pedidos" : null,
+      available: canOperate,
+      locked: !canOperate,
+      description: "Fila de pedidos e acompanhamento",
     },
     {
       key: "deliveries",
