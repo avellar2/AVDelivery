@@ -92,6 +92,13 @@ test.describe("pedidos de ponta a ponta", () => {
             slug: otherSlug,
             active: true,
             accepting_orders: true,
+            delivery_enabled: true,
+            pickup_enabled: true,
+            delivery_fee_cents: 0,
+            min_order_cents: 0,
+            payment_pix_enabled: false,
+            payment_cash_enabled: true,
+            payment_card_on_delivery_enabled: false,
           },
         ])
         .select("id, slug");
@@ -231,15 +238,18 @@ test.describe("pedidos de ponta a ponta", () => {
       await login(ownerPage, ownerEmail, password);
       await ownerPage.goto("/dashboard/pedidos");
       await expect(ownerPage.getByRole("heading", { level: 1, name: "Pedidos" })).toBeVisible();
-      await expect(ownerPage.getByText(`#${orderNumber}`)).toBeVisible({ timeout: 20_000 });
-      await expect(ownerPage.getByText(customerName)).toBeVisible();
+      const orderButton = ownerPage.getByRole("button", {
+        name: new RegExp(`#${orderNumber}`),
+      });
+      await expect(orderButton).toBeVisible({ timeout: 20_000 });
+      await expect(ownerPage.getByText(customerName).first()).toBeVisible();
 
-      await ownerPage.getByRole("button", { name: new RegExp(`#${orderNumber}`) }).click();
+      await orderButton.click();
       await expect(
         ownerPage.getByRole("heading", { level: 2, name: `Pedido #${orderNumber}` }),
       ).toBeVisible();
-      await expect(ownerPage.getByText("X-Bacon E2E")).toBeVisible();
-      await expect(ownerPage.getByText("Dinheiro na entrega")).toBeVisible();
+      await expect(ownerPage.getByText("X-Bacon E2E").first()).toBeVisible();
+      await expect(ownerPage.getByText("Dinheiro na entrega").first()).toBeVisible();
 
       await customerPage.goto(trackingHref!);
       await expect(
@@ -255,9 +265,12 @@ test.describe("pedidos de ponta a ponta", () => {
         expectedCustomerText: string,
       ) {
         await ownerPage.getByRole("button", { name: buttonName }).click();
-        await expect(ownerPage.getByText(expectedOwnerStatus, { exact: true }).first()).toBeVisible(
-          { timeout: 20_000 },
-        );
+        await expect(
+          ownerPage
+            .getByText(expectedOwnerStatus, { exact: true })
+            .filter({ visible: true })
+            .first(),
+        ).toBeVisible({ timeout: 20_000 });
 
         await customerPage.getByRole("button", { name: "Atualizar agora" }).click();
         await expect(customerPage.getByText(expectedCustomerText)).toBeVisible({
@@ -273,12 +286,18 @@ test.describe("pedidos de ponta a ponta", () => {
         "Pedido pronto. Ele sairá para entrega em breve.",
       );
       await advance("Saiu para entrega", "Em entrega", "O pedido saiu para entrega.");
+
+      // Pedidos entregues saem do filtro "Em andamento"; o filtro ampliado mantém o
+      // detalhe aberto para validar o estado final e o pagamento na interface.
+      await ownerPage.getByLabel("Filtrar pedidos").selectOption("all");
+      await expect(orderButton).toBeVisible();
+      await orderButton.click();
       await advance("Marcar como entregue", "Entregue", "Pedido entregue. Bom apetite!");
 
       await ownerPage.getByRole("button", { name: "Marcar como pago" }).click();
-      await expect(ownerPage.getByText("Pago", { exact: true }).first()).toBeVisible({
-        timeout: 20_000,
-      });
+      await expect(
+        ownerPage.getByText("Pago", { exact: true }).filter({ visible: true }).first(),
+      ).toBeVisible({ timeout: 20_000 });
 
       const { data: storedOrder } = await admin
         .from("orders")
@@ -357,13 +376,20 @@ test.describe("pedidos de ponta a ponta", () => {
       expect(pickupOrder?.total_cents).toBe(2500);
 
       await ownerPage.getByRole("button", { name: "Atualizar" }).click();
-      await expect(ownerPage.getByText(`#${pickupNumber}`)).toBeVisible({ timeout: 20_000 });
-      await ownerPage.getByRole("button", { name: new RegExp(`#${pickupNumber}`) }).click();
+      const pickupButton = ownerPage.getByRole("button", {
+        name: new RegExp(`#${pickupNumber}`),
+      });
+      await expect(pickupButton).toBeVisible({ timeout: 20_000 });
+      await pickupButton.click();
       await expect(
         ownerPage.getByRole("heading", { level: 2, name: `Pedido #${pickupNumber}` }),
       ).toBeVisible();
-      await expect(ownerPage.getByText("Retirada", { exact: true }).first()).toBeVisible();
-      await expect(ownerPage.getByText("Pix manual", { exact: true }).first()).toBeVisible();
+      await expect(
+        ownerPage.getByText("Retirada no local", { exact: true }).filter({ visible: true }).first(),
+      ).toBeVisible();
+      await expect(
+        ownerPage.getByText("Pix manual", { exact: true }).filter({ visible: true }).first(),
+      ).toBeVisible();
 
       await customerPage.goto(pickupTrackingHref!);
       await expect(

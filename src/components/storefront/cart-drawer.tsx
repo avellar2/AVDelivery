@@ -590,7 +590,9 @@ export function CartDrawer({
                         />
                         Retirada no local
                       </span>
-                      <span className="mt-1 block text-xs text-zinc-500">Sem taxa de entrega</span>
+                      <span className="mt-1 block text-xs text-zinc-500">
+                        Retire no balcão da loja
+                      </span>
                     </label>
                   ) : null}
                 </div>

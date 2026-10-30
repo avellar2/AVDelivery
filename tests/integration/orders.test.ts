@@ -171,18 +171,33 @@ describe.skipIf(!enabled)("pedidos (integração real)", () => {
           min_order_cents: 0,
           payment_pix_enabled: false,
           payment_cash_enabled: true,
+          payment_card_on_delivery_enabled: false,
         },
         {
           name: "Pedidos Loja pausada",
           slug: slugPaused,
           active: true,
           accepting_orders: false,
+          delivery_enabled: true,
+          pickup_enabled: true,
+          delivery_fee_cents: 0,
+          min_order_cents: 0,
+          payment_pix_enabled: false,
+          payment_cash_enabled: true,
+          payment_card_on_delivery_enabled: false,
         },
         {
           name: "Pedidos Loja inativa",
           slug: slugInactive,
           active: false,
           accepting_orders: true,
+          delivery_enabled: true,
+          pickup_enabled: true,
+          delivery_fee_cents: 0,
+          min_order_cents: 0,
+          payment_pix_enabled: false,
+          payment_cash_enabled: true,
+          payment_card_on_delivery_enabled: false,
         },
         {
           name: "Pedidos Loja sem entrega",
@@ -196,6 +211,7 @@ describe.skipIf(!enabled)("pedidos (integração real)", () => {
           payment_pix_enabled: true,
           pix_key: "pix@pedidos.test",
           payment_cash_enabled: false,
+          payment_card_on_delivery_enabled: false,
         },
       ])
       .select("id, slug");
@@ -900,12 +916,25 @@ describe.skipIf(!enabled)("pedidos (integração real)", () => {
     const inactive = await createOrder(slugInactive, orderPayload(), newKey(), newTokenHash());
     expect(errorMessage(inactive.error)).toContain("store_unavailable");
 
-    const deliveryOff = await createOrder(slugNoDelivery, orderPayload(), newKey(), newTokenHash());
+    const deliveryOff = await createOrder(
+      slugNoDelivery,
+      orderPayload({
+        paymentMethod: "pix",
+        items: [{ productId: productNoDelivery, quantity: 1, notes: "", options: [] }],
+      }),
+      newKey(),
+      newTokenHash(),
+    );
     expect(errorMessage(deliveryOff.error)).toContain("fulfillment_unavailable");
 
     const cashOff = await createOrder(
       slugNoDelivery,
-      orderPayload({ fulfillmentType: "pickup", address: null, paymentMethod: "cash" }),
+      orderPayload({
+        fulfillmentType: "pickup",
+        address: null,
+        paymentMethod: "cash",
+        items: [{ productId: productNoDelivery, quantity: 1, notes: "", options: [] }],
+      }),
       newKey(),
       newTokenHash(),
     );
