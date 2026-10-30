@@ -250,16 +250,18 @@ contra Supabase real ainda não ocorreu.
 
 ### O que foi validado localmente
 
-| Verificação        | Resultado                                                       |
-| ------------------ | --------------------------------------------------------------- |
-| `npm run typecheck`| OK                                                              |
-| `npm run lint`     | OK, sem avisos                                                  |
-| `npm test`         | **104 aprovados / 41 ignorados** (14 arquivos; 3 ignorados)     |
-| `npm run build`    | OK, inclui `/dashboard/pedidos` e `/loja/[slug]/pedido/[numero]` |
+| Verificação            | Resultado                                                                        |
+| ---------------------- | -------------------------------------------------------------------------------- |
+| `npm run typecheck`    | OK                                                                               |
+| `npm run lint`         | OK, sem avisos                                                                   |
+| `npm test`             | **104 aprovados / 45 ignorados** (14 arquivos; 3 ignorados)                      |
+| `npm run build`        | OK, inclui `/dashboard/pedidos` e `/loja/[slug]/pedido/[numero]`                 |
 | `npm run format:check` | Falha em arquivos pré-existentes (fim de linha); novos arquivos estão formatados |
 
-Os 41 testes ignorados são exatamente a integração com Supabase (`tests/integration/orders.test.ts`)
-e os E2E que exigem `SUPABASE_TEST_*`/credenciais. Eles **não** contam como aprovados.
+Os 45 testes ignorados por `npm test` são todos de Vitest e exigem Supabase de teste: 27 de
+Fundação/cardápio e 18 de pedidos (`tests/integration/orders.test.ts`). O E2E roda em suíte separada
+(`npm run test:e2e`) e também não é executado sem `SUPABASE_TEST_*`. Nenhum deles conta como
+aprovado.
 
 ### O que falta para homologar
 

@@ -87,15 +87,10 @@ begin
   select *
   into v_store
   from public.stores s
-  where s.slug = btrim(p_store_slug)
-    and s.active;
+  where s.slug = btrim(p_store_slug);
 
   if not found then
     raise exception 'store_unavailable';
-  end if;
-
-  if not v_store.accepting_orders then
-    raise exception 'orders_paused';
   end if;
 
   -- Serialize concurrent attempts that share the same idempotency key.
@@ -126,6 +121,16 @@ begin
       'fulfillmentType', v_existing.fulfillment_type,
       'created', false
     );
+  end if;
+
+  -- An accepted checkout must remain retryable even if the store pauses or is
+  -- deactivated between the first attempt and a retry of the same attempt.
+  if not v_store.active then
+    raise exception 'store_unavailable';
+  end if;
+
+  if not v_store.accepting_orders then
+    raise exception 'orders_paused';
   end if;
 
   if p_payload is null or jsonb_typeof(p_payload) <> 'object' then
@@ -295,6 +300,10 @@ begin
       raise exception 'invalid_options';
     end if;
 
+    if jsonb_array_length(coalesce(v_item -> 'options', '[]'::jsonb)) > 50 then
+      raise exception 'invalid_options';
+    end if;
+
     select count(*), count(distinct lower(value ->> 'optionId'))
     into v_selected_count, v_distinct_count
     from jsonb_array_elements(coalesce(v_item -> 'options', '[]'::jsonb));
@@ -455,11 +464,13 @@ begin
   from public.orders o
   where o.store_id = v_store.id;
 
+  -- O nome do cadastro é o primeiro informado para o telefone; pedidos guardam
+  -- seu próprio snapshot. Assim, um checkout anônimo não reescreve o nome de um
+  -- cadastro existente apenas por conhecer o telefone.
   insert into public.customers (store_id, name, phone)
   values (v_store.id, v_customer_name, v_customer_phone)
   on conflict (store_id, phone) do update
-    set name = excluded.name,
-        updated_at = now()
+    set updated_at = now()
   returning id into v_customer_id;
 
   insert into public.orders (

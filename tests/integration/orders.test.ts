@@ -35,11 +35,13 @@ let slugInactive = "";
 let slugNoDelivery = "";
 let categoryA = "";
 let categoryB = "";
+let categoryNoDelivery = "";
 let productA = "";
 let productCheap = "";
 let productRequired = "";
 let productUnavailable = "";
 let productB = "";
+let productNoDelivery = "";
 let groupA = "";
 let groupRequired = "";
 let groupB = "";
@@ -251,6 +253,7 @@ describe.skipIf(!enabled)("pedidos (integração real)", () => {
       .insert([
         { store_id: storeA, name: "Lanches", active: true },
         { store_id: storeB, name: "Pizzas", active: true },
+        { store_id: storeNoDelivery, name: "Retirada", active: true },
       ])
       .select("id, store_id");
 
@@ -260,6 +263,7 @@ describe.skipIf(!enabled)("pedidos (integração real)", () => {
 
     categoryA = categories.find((row) => row.store_id === storeA)!.id;
     categoryB = categories.find((row) => row.store_id === storeB)!.id;
+    categoryNoDelivery = categories.find((row) => row.store_id === storeNoDelivery)!.id;
 
     const { data: products, error: productsError } = await admin
       .from("products")
@@ -299,6 +303,13 @@ describe.skipIf(!enabled)("pedidos (integração real)", () => {
           price_cents: 3900,
           available: true,
         },
+        {
+          store_id: storeNoDelivery,
+          category_id: categoryNoDelivery,
+          name: "Produto retirada",
+          price_cents: 1000,
+          available: true,
+        },
       ])
       .select("id, name");
 
@@ -311,6 +322,7 @@ describe.skipIf(!enabled)("pedidos (integração real)", () => {
     productRequired = products.find((row) => row.name === "Combo obrigatório")!.id;
     productUnavailable = products.find((row) => row.name === "Produto indisponível")!.id;
     productB = products.find((row) => row.name === "Pizza B")!.id;
+    productNoDelivery = products.find((row) => row.name === "Produto retirada")!.id;
 
     const { data: groups, error: groupsError } = await admin
       .from("option_groups")
@@ -595,6 +607,44 @@ describe.skipIf(!enabled)("pedidos (integração real)", () => {
     expect(count).toBe(1);
   });
 
+  it("não reescreve o nome do cadastro existente com novo checkout anônimo", async () => {
+    const phone = nextPhone();
+
+    const first = await createOrder(
+      slugA,
+      orderPayload({ customerPhone: phone, customerName: "Nome Original" }),
+      newKey(),
+      newTokenHash(),
+    );
+    expect(first.error).toBeNull();
+
+    const second = await createOrder(
+      slugA,
+      orderPayload({ customerPhone: phone, customerName: "Nome Alterado" }),
+      newKey(),
+      newTokenHash(),
+    );
+    expect(second.error).toBeNull();
+
+    const { data: customer } = await admin
+      .from("customers")
+      .select("name")
+      .eq("store_id", storeA)
+      .eq("phone", phone)
+      .single();
+    expect(customer?.name).toBe("Nome Original");
+
+    const { data: latestOrder } = await admin
+      .from("orders")
+      .select("customer_name")
+      .eq("store_id", storeA)
+      .eq("customer_phone", phone)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+    expect(latestOrder?.customer_name).toBe("Nome Alterado");
+  });
+
   it("reutilizar a chave com conteúdo diferente gera conflito", async () => {
     const key = newKey();
     const tokenHash = newTokenHash();
@@ -643,6 +693,109 @@ describe.skipIf(!enabled)("pedidos (integração real)", () => {
       .eq("idempotency_key", key);
 
     expect(count).toBe(1);
+  });
+
+  it("repetir a mesma tentativa funciona após pausar ou desativar a loja", async () => {
+    const payload = orderPayload({
+      items: [{ productId: productA, quantity: 1, notes: "", options: [] }],
+    });
+    const key = newKey();
+    const tokenHash = newTokenHash();
+
+    const first = await createOrder(slugA, payload, key, tokenHash);
+    expect(first.error).toBeNull();
+    const original = (first.data as Record<string, unknown>).orderId;
+
+    try {
+      const { error: pauseError } = await admin
+        .from("stores")
+        .update({ accepting_orders: false })
+        .eq("id", storeA);
+      expect(pauseError).toBeNull();
+
+      const pausedRetry = await createOrder(slugA, payload, key, tokenHash);
+      expect(pausedRetry.error).toBeNull();
+      expect((pausedRetry.data as Record<string, unknown>).orderId).toBe(original);
+      expect((pausedRetry.data as Record<string, unknown>).created).toBe(false);
+
+      const pausedNewKey = await createOrder(
+        slugA,
+        orderPayload({ items: [{ productId: productA, quantity: 2, notes: "", options: [] }] }),
+        newKey(),
+        newTokenHash(),
+      );
+      expect(errorMessage(pausedNewKey.error)).toContain("orders_paused");
+
+      const { error: deactivateError } = await admin
+        .from("stores")
+        .update({ active: false, accepting_orders: true })
+        .eq("id", storeA);
+      expect(deactivateError).toBeNull();
+
+      const inactiveRetry = await createOrder(slugA, payload, key, tokenHash);
+      expect(inactiveRetry.error).toBeNull();
+      expect((inactiveRetry.data as Record<string, unknown>).orderId).toBe(original);
+
+      const inactiveNewKey = await createOrder(
+        slugA,
+        orderPayload({ items: [{ productId: productA, quantity: 2, notes: "", options: [] }] }),
+        newKey(),
+        newTokenHash(),
+      );
+      expect(errorMessage(inactiveNewKey.error)).toContain("store_unavailable");
+    } finally {
+      const { error: restoreError } = await admin
+        .from("stores")
+        .update({ active: true, accepting_orders: true })
+        .eq("id", storeA);
+      expect(restoreError).toBeNull();
+    }
+  });
+
+  it("rejeita mais de 50 adicionais no mesmo item", async () => {
+    const options = Array.from({ length: 51 }, (_, index) => ({
+      groupId: `grupo-${index}`,
+      optionId: `opcao-${index}`,
+      quantity: 1,
+    }));
+
+    const rejected = await createOrder(
+      slugA,
+      orderPayload({
+        items: [{ productId: productA, quantity: 1, notes: "", options }],
+      }),
+      newKey(),
+      newTokenHash(),
+    );
+
+    expect(errorMessage(rejected.error)).toContain("invalid_options");
+  });
+
+  it("não repete número de pedido em criações simultâneas", async () => {
+    const payloads = Array.from({ length: 5 }, () =>
+      orderPayload({
+        items: [{ productId: productA, quantity: 1, notes: "", options: [] }],
+      }),
+    );
+
+    const results = await Promise.all(
+      payloads.map((payload) => createOrder(slugA, payload, newKey(), newTokenHash())),
+    );
+
+    expect(results.every((response) => response.error === null)).toBe(true);
+
+    const numbers = results.map((response) =>
+      Number((response.data as Record<string, unknown>).orderNumber),
+    );
+    expect(new Set(numbers).size).toBe(numbers.length);
+
+    const { data: stored } = await admin
+      .from("orders")
+      .select("order_number")
+      .eq("store_id", storeA)
+      .in("order_number", numbers);
+
+    expect(stored?.length).toBe(numbers.length);
   });
 
   it("rejeita produto ou adicional indisponível", async () => {
@@ -760,7 +913,12 @@ describe.skipIf(!enabled)("pedidos (integração real)", () => {
 
     const validPickupPix = await createOrder(
       slugNoDelivery,
-      orderPayload({ fulfillmentType: "pickup", address: null, paymentMethod: "pix" }),
+      orderPayload({
+        fulfillmentType: "pickup",
+        address: null,
+        paymentMethod: "pix",
+        items: [{ productId: productNoDelivery, quantity: 1, notes: "", options: [] }],
+      }),
       newKey(),
       newTokenHash(),
     );

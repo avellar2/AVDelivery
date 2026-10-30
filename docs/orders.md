@@ -72,21 +72,26 @@ Função `security definer` com `set search_path = ''`, executável por `anon`, 
 
 1. Valida slug, chave de idempotência (`[A-Za-z0-9_-]{8,100}`), hash da requisição e hash do token
    (64 hex).
-2. Carrega a loja por slug **e** `active = true`; exige `accepting_orders`.
-3. Toma um advisory lock transacional por `(loja, chave de idempotência)` e procura pedido existente:
-   - mesmo `request_hash` → devolve o pedido original com `created: false`;
+2. Carrega a loja por slug (sem exigir `active` ainda) e toma um advisory lock transacional por
+   `(loja, chave de idempotência)`, procurando um pedido existente:
+   - mesmo `request_hash` → devolve o pedido original com `created: false`, **mesmo que a loja tenha
+     sido pausada ou desativada depois da primeira tentativa**;
    - hash diferente → `idempotency_conflict`.
+3. Somente para pedidos novos, exige loja `active` e `accepting_orders`; caso contrário devolve
+   `store_unavailable` / `orders_paused`.
 4. Valida cliente, tipo de atendimento, forma de pagamento habilitada, endereço, observações e
    quantidade de itens (1 a 50; cada item 1 a 99).
 5. Para cada item, carrega produto disponível de categoria ativa **daquela loja** e recalcula o
    preço unitário: `preço do produto + Σ(preço do adicional × quantidade)`.
 6. Valida cada adicional por grupo/produto/loja, exige que a opção esteja disponível, rejeita
-   duplicidade e confere mínimo/máximo por grupo (limitado às opções disponíveis).
+   duplicidade, limita a 50 adicionais por item e confere mínimo/máximo por grupo (limitado às
+   opções disponíveis).
 7. Recalcula subtotal e taxa; aplica `min_order_cents`; calcula `total = subtotal + taxa`.
 8. Aplica limites por telefone **no banco**: no máximo 3 pedidos por minuto e 20 por hora por loja.
 9. Aloca `order_number` sequencial por loja (`max + 1`) sob advisory lock.
-10. Faz upsert do cliente por `(store_id, phone)` e insere pedido, itens, adicionais e o evento
-    inicial `null → pending`. Tudo na mesma transação.
+10. Faz upsert do cliente por `(store_id, phone)` — em telefone já cadastrado, mantém o nome
+    original do cadastro — e insere pedido, itens, adicionais e o evento inicial `null → pending`.
+    Tudo na mesma transação.
 
 Se qualquer etapa falhar, nada é persistido. Os preços, nomes de produto/adicional e o endereço são
 gravados como **snapshots**; mudanças posteriores no cardápio não alteram pedidos existentes.
@@ -230,7 +235,9 @@ direta, acompanhamento por token e rate limit por telefone.
 
 E2E (`tests/e2e/orders.spec.ts`, requer Supabase de teste): cliente mobile pede sem login, vê a
 confirmação e o link; owner recebe o pedido, avança todos os status e marca o pagamento; cliente
-acompanha cada mudança; outro tenant não vê o pedido.
+acompanha cada mudança; outro tenant não vê o pedido. Um segundo pedido cobre **retirada com Pix
+manual** (chave exibida, sem cobrança automática, endereço nulo no banco) e o acompanhamento
+correspondente.
 
 Sem `SUPABASE_TEST_*`, integração e E2E são **ignorados** e não contam como aprovados.
 

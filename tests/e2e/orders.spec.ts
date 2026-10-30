@@ -300,6 +300,77 @@ test.describe("pedidos de ponta a ponta", () => {
       await expect(
         otherPage.getByRole("heading", { level: 2, name: `Pedido #${orderNumber}` }),
       ).toHaveCount(0);
+
+      // Segundo pedido: retirada no local com Pix manual, sem gateway.
+      await customerPage.goto(`/loja/${storeSlug}`);
+      await expect(customerPage.getByRole("heading", { level: 1, name: storeName })).toBeVisible({
+        timeout: 30_000,
+      });
+
+      await customerPage.getByRole("button", { name: "Personalizar" }).click();
+      await customerPage.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+      await customerPage.getByRole("button", { name: "Ver carrinho" }).click();
+
+      const pickupDialog = customerPage.getByRole("dialog", { name: "Carrinho e checkout" });
+      await pickupDialog.getByRole("button", { name: "Continuar para o checkout" }).click();
+      await pickupDialog.getByLabel("Nome", { exact: true }).fill(customerName);
+      await pickupDialog.getByLabel("WhatsApp / telefone").fill(customerPhone);
+      await pickupDialog.getByRole("radio", { name: /Retirada no local/ }).check();
+      await pickupDialog.getByRole("radio", { name: /Pix manual/ }).check();
+
+      await expect(pickupDialog.getByText("Chave Pix: pix@e2e.test").first()).toBeVisible();
+      await expect(pickupDialog.getByLabel("Rua", { exact: true })).toHaveCount(0);
+
+      await pickupDialog.getByRole("button", { name: "Revisar pedido" }).click();
+      await expect(pickupDialog.getByText("Retirada", { exact: true })).toBeVisible();
+      await expect(pickupDialog.getByText("Pix manual", { exact: true })).toBeVisible();
+      await expect(pickupDialog.getByText("Chave Pix: pix@e2e.test").first()).toBeVisible();
+      await expect(pickupDialog.getByText("Taxa de entrega")).toBeVisible();
+
+      await pickupDialog.getByRole("button", { name: "Confirmar pedido" }).click();
+
+      const pickupConfirmation = pickupDialog.getByText(/Pedido #\d+ confirmado!/);
+      await expect(pickupConfirmation).toBeVisible({ timeout: 30_000 });
+      const pickupNumber = Number((await pickupConfirmation.textContent())?.match(/#(\d+)/)?.[1]);
+      expect(pickupNumber).toBeGreaterThan(orderNumber);
+      await expect(pickupDialog.getByText("Chave Pix: pix@e2e.test").first()).toBeVisible();
+
+      const pickupTrackingHref = await pickupDialog
+        .getByRole("link", { name: "Acompanhar pedido" })
+        .getAttribute("href");
+      expect(pickupTrackingHref).toContain(`/loja/${storeSlug}/pedido/${pickupNumber}#t=`);
+      expect(pickupTrackingHref).toMatch(/#t=[0-9a-f]{64}$/);
+
+      const { data: pickupOrder } = await admin
+        .from("orders")
+        .select(
+          "fulfillment_type, payment_method, payment_status, delivery_address_snapshot, total_cents",
+        )
+        .eq("store_id", storeId)
+        .eq("order_number", pickupNumber)
+        .single();
+
+      expect(pickupOrder?.fulfillment_type).toBe("pickup");
+      expect(pickupOrder?.payment_method).toBe("pix");
+      expect(pickupOrder?.payment_status).toBe("pending");
+      expect(pickupOrder?.delivery_address_snapshot).toBeNull();
+      expect(pickupOrder?.total_cents).toBe(2500);
+
+      await ownerPage.getByRole("button", { name: "Atualizar" }).click();
+      await expect(ownerPage.getByText(`#${pickupNumber}`)).toBeVisible({ timeout: 20_000 });
+      await ownerPage.getByRole("button", { name: new RegExp(`#${pickupNumber}`) }).click();
+      await expect(
+        ownerPage.getByRole("heading", { level: 2, name: `Pedido #${pickupNumber}` }),
+      ).toBeVisible();
+      await expect(ownerPage.getByText("Retirada", { exact: true }).first()).toBeVisible();
+      await expect(ownerPage.getByText("Pix manual", { exact: true }).first()).toBeVisible();
+
+      await customerPage.goto(pickupTrackingHref!);
+      await expect(
+        customerPage.getByRole("heading", { level: 1, name: `Pedido #${pickupNumber}` }),
+      ).toBeVisible({ timeout: 30_000 });
+      await expect(customerPage.getByText("Retirada", { exact: true }).first()).toBeVisible();
+      await expect(customerPage.getByText("Pix manual", { exact: true }).first()).toBeVisible();
     } finally {
       try {
         if (storeIds.length > 0) {

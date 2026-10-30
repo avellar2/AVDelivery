@@ -53,7 +53,8 @@ export function canonicalizeCheckout(input: CheckoutInput): CheckoutInput {
         (left, right) =>
           left.productId.localeCompare(right.productId) ||
           left.notes.localeCompare(right.notes) ||
-          optionSignature(left.options).localeCompare(optionSignature(right.options)),
+          optionSignature(left.options).localeCompare(optionSignature(right.options)) ||
+          left.quantity - right.quantity,
       ),
   };
 }

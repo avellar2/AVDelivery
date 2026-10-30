@@ -252,8 +252,8 @@ npm test                 # unitários + integração (integração é ignorada s
 npm run test:e2e         # requer: npx playwright install chromium
 ```
 
-Situação atual: **104 testes Vitest aprovados** (unitários e contratuais) e **41 ignorados** — os 27
-testes de integração da Fundação/cardápio e os 14 de pedidos, que exigem `SUPABASE_TEST_*`. Os 12 E2E
+Situação atual: **104 testes Vitest aprovados** (unitários e contratuais) e **45 ignorados** — os 27
+testes de integração da Fundação/cardápio e os 18 de pedidos, que exigem `SUPABASE_TEST_*`. Os 12 E2E
 das etapas anteriores foram aprovados na homologação; o E2E de pedidos ainda não foi executado
 contra Supabase real. O detalhamento está em [docs/homologation.md](docs/homologation.md).
 
