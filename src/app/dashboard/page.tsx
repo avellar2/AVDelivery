@@ -5,20 +5,19 @@ import { Button, buttonClassName } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
+  canAssignDeliveries,
   canManageMenu,
   canManageSettings,
   canOperateOrders,
+  isDriver,
   roleLabel,
 } from "@/modules/memberships/roles";
+import { countDeliveriesForStore } from "@/modules/deliveries/service";
 import { countOrdersByStatus } from "@/modules/orders/service";
 import { getDashboardContext } from "@/modules/stores/active-store";
 import { selectStoreAction } from "@/modules/stores/actions";
 
 const upcomingModules = [
-  {
-    title: "Entregas",
-    description: "Gestão de entregadores e rotas de entrega.",
-  },
   {
     title: "Funcionários",
     description: "Convites e permissões da equipe da loja.",
@@ -90,7 +89,11 @@ export default async function DashboardPage() {
   const canManage = canManageSettings(membership.role);
   const canManageProducts = canManageMenu(membership.role);
   const canOperate = canOperateOrders(membership.role);
+  const canDeliver = canAssignDeliveries(membership.role);
+  const driverAccess = isDriver(membership.role);
   const orderCounts = canOperate ? await countOrdersByStatus(membership.storeId) : null;
+  const deliveryCounts =
+    canDeliver || driverAccess ? await countDeliveriesForStore(membership.storeId) : null;
   const activeOrders = orderCounts
     ? orderCounts.pending +
       orderCounts.accepted +
@@ -209,6 +212,36 @@ export default async function DashboardPage() {
                   className="inline-flex text-sm font-medium text-orange-700 hover:text-orange-800"
                 >
                   Abrir fila de pedidos
+                </Link>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {canDeliver || driverAccess ? (
+            <Card>
+              <CardContent className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-zinc-900">
+                    {driverAccess ? "Minhas entregas" : "Entregas"}
+                  </h3>
+                  <Badge
+                    variant={deliveryCounts && deliveryCounts.active > 0 ? "warning" : "success"}
+                  >
+                    {deliveryCounts && deliveryCounts.active > 0
+                      ? `${deliveryCounts.active} em rota`
+                      : "Disponível"}
+                  </Badge>
+                </div>
+                <p className="text-sm text-zinc-500">
+                  {driverAccess
+                    ? "Pedidos atribuídos a você, coleta e confirmação."
+                    : "Entregadores, atribuições e histórico de entregas."}
+                </p>
+                <Link
+                  href={driverAccess ? "/entregador" : "/dashboard/entregadores"}
+                  className="inline-flex text-sm font-medium text-orange-700 hover:text-orange-800"
+                >
+                  {driverAccess ? "Abrir minhas entregas" : "Gerenciar entregadores"}
                 </Link>
               </CardContent>
             </Card>

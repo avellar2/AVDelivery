@@ -141,6 +141,12 @@ Permissões:
 | Avançar status                |  sim  |   sim   |   sim    |  não   |
 | Cancelar pedido               |  sim  |   sim   |   não    |  não   |
 | Alterar situação do pagamento |  sim  |   sim   |   não    |  não   |
+| Ver o próprio pedido em rota  |  n/a  |   n/a   |   n/a    |  sim   |
+
+Desde a Etapa 4, o entregador acessa apenas `/entregador`: vê o próprio pedido atribuído, inicia a
+coleta (`ready → out_for_delivery`) e confirma a entrega (`out_for_delivery → delivered`) pelas RPCs
+de entrega. Ele não usa a fila `/dashboard/pedidos`, não vê pagamentos da loja e perde o acesso ao
+pedido se for reatribuído ou cancelado. Detalhes em [deliveries.md](deliveries.md).
 
 Superadministrador segue a política existente (`private.is_platform_admin()`).
 
@@ -162,7 +168,8 @@ Superadministrador segue a política existente (`private.is_platform_admin()`).
 - Somente as transições permitidas aparecem como botões; o banco valida novamente.
 - Atualização automática a cada 15 s (pausada quando a aba está oculta) + botão "Atualizar".
 - Contagem de pedidos em andamento aparece no cartão de Pedidos da visão geral do painel.
-- `driver` não acessa a página, não vê o item de navegação e não lê as tabelas pela RLS.
+- `driver` não acessa a página nem vê o item de navegação; a RLS mostra apenas os pedidos com
+  entrega atribuída a ele, consumidos pelo painel `/entregador` (Etapa 4).
 
 ## Acompanhamento sem login
 
@@ -176,8 +183,9 @@ Rota pública: `/loja/[slug]/pedido/[numero]#t=<token>`.
 - `get_order_tracking(slug, número, hash)` só devolve o pedido quando slug, número e hash coincidem.
   Não existe consulta por ID ou por número sequencial.
 - Respostas inválidas são genéricas; a página usa `noindex` e política de referência restrita.
-- O cliente vê número, itens, totais, pagamento, endereço, status e histórico. Não há GPS nem dados
-  de outros pedidos.
+- O cliente vê número, itens, totais, pagamento, endereço, status, histórico e, desde a Etapa 4, o
+  estado da entrega (`assigned`, `picked_up`, `delivered`, `canceled`) com horários. Não há GPS nem
+  identidade/telefone/posição do entregador.
 - Atualização automática a cada 12 s enquanto o pedido não é terminal, ao voltar para a aba e pelo
   botão "Atualizar agora".
 
@@ -205,17 +213,18 @@ duração, mantendo o polling como fallback.
 
 ## RLS e privacidade
 
-| Tabela               | `anon` | `authenticated`                                |
-| -------------------- | ------ | ---------------------------------------------- |
-| `customers`          | —      | `select` para owner/manager/employee do tenant |
-| `orders`             | —      | `select` para owner/manager/employee do tenant |
-| `order_items`        | —      | idem                                           |
-| `order_item_options` | —      | idem                                           |
-| `order_events`       | —      | idem                                           |
+| Tabela               | `anon` | `authenticated`                                                          |
+| -------------------- | ------ | ------------------------------------------------------------------------ |
+| `customers`          | —      | `select` para owner/manager/employee do tenant                           |
+| `orders`             | —      | `select` para owner/manager/employee do tenant ou entregador com entrega |
+| `order_items`        | —      | idem                                                                     |
+| `order_item_options` | —      | idem                                                                     |
+| `order_events`       | —      | idem (somente owner/manager/employee)                                    |
 
 - Não há grant de `insert`, `update` ou `delete` para `anon`/`authenticated`; toda escrita passa
   pelas RPCs.
-- `driver` não lê pedidos nesta etapa.
+- `driver` não acessa a fila da loja; lê apenas pedidos com entrega ativa dele ou já entregues por
+  ele (Etapa 4).
 - Acesso anônimo existe apenas pelas RPCs `create_order` e `get_order_tracking`, ambas com validação
   completa e retorno limitado.
 - `tracking_token_hash` e `request_hash` não são devolvidos ao cliente.
@@ -245,7 +254,9 @@ Sem `SUPABASE_TEST_*`, integração e E2E são **ignorados** e não contam como 
 
 - Sem gateway de pagamento, conciliação automática, impressão térmica, cupom, desconto, troco ou
   agendamento.
-- Sem GPS, aplicativo de entregador ou atribuição de entregador.
+- Sem GPS, aplicativo de entregador ou atribuição de entregador nesta etapa. A atribuição e o
+  painel `/entregador` foram entregues na Etapa 4 (ver [deliveries.md](deliveries.md)); GPS segue
+  fora de escopo.
 - Atualização por polling, não push.
 - Limitador em memória por instância; os limites de telefone no banco são a barreira compartilhada.
 - Lista do painel limitada a 200 pedidos por consulta, sem paginação.

@@ -11,6 +11,8 @@ export type OrderPaymentMethod = "pix" | "cash" | "card_on_delivery";
 
 export type OrderPaymentStatus = "pending" | "paid" | "canceled";
 
+export type DeliveryStatus = "assigned" | "picked_up" | "delivered" | "canceled";
+
 export type Database = {
   public: {
     Tables: {
@@ -440,6 +442,109 @@ export type Database = {
         };
         Relationships: [];
       };
+      driver_profiles: {
+        Row: {
+          id: string;
+          store_id: string;
+          user_id: string;
+          display_name: string;
+          phone: string | null;
+          active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          user_id: string;
+          display_name: string;
+          phone?: string | null;
+          active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          display_name?: string;
+          phone?: string | null;
+          active?: boolean;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      deliveries: {
+        Row: {
+          id: string;
+          store_id: string;
+          order_id: string;
+          driver_profile_id: string;
+          assigned_by: string | null;
+          status: DeliveryStatus;
+          assigned_at: string;
+          picked_up_at: string | null;
+          delivered_at: string | null;
+          canceled_at: string | null;
+          canceled_by: string | null;
+          cancel_reason: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          order_id: string;
+          driver_profile_id: string;
+          assigned_by?: string | null;
+          status?: DeliveryStatus;
+          assigned_at?: string;
+          picked_up_at?: string | null;
+          delivered_at?: string | null;
+          canceled_at?: string | null;
+          canceled_by?: string | null;
+          cancel_reason?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          status?: DeliveryStatus;
+          picked_up_at?: string | null;
+          delivered_at?: string | null;
+          canceled_at?: string | null;
+          canceled_by?: string | null;
+          cancel_reason?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      delivery_events: {
+        Row: {
+          id: string;
+          store_id: string;
+          delivery_id: string;
+          order_id: string;
+          driver_profile_id: string;
+          previous_status: DeliveryStatus | null;
+          new_status: DeliveryStatus;
+          actor_id: string | null;
+          reason: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          delivery_id: string;
+          order_id: string;
+          driver_profile_id: string;
+          previous_status?: DeliveryStatus | null;
+          new_status: DeliveryStatus;
+          actor_id?: string | null;
+          reason?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          reason?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: {
@@ -475,6 +580,51 @@ export type Database = {
         };
         Returns: Json;
       };
+      create_driver: {
+        Args: {
+          p_store_id: string;
+          p_user_id: string;
+          p_display_name: string;
+          p_phone: string | null;
+        };
+        Returns: Json;
+      };
+      update_driver: {
+        Args: {
+          p_driver_profile_id: string;
+          p_display_name: string;
+          p_phone: string | null;
+          p_active: boolean;
+        };
+        Returns: Json;
+      };
+      assign_delivery: {
+        Args: {
+          p_order_id: string;
+          p_driver_profile_id: string;
+        };
+        Returns: Json;
+      };
+      reassign_delivery: {
+        Args: {
+          p_delivery_id: string;
+          p_new_driver_profile_id: string;
+          p_reason: string;
+        };
+        Returns: Json;
+      };
+      start_delivery: {
+        Args: { p_delivery_id: string };
+        Returns: Json;
+      };
+      complete_delivery: {
+        Args: { p_delivery_id: string };
+        Returns: Json;
+      };
+      cancel_delivery: {
+        Args: { p_delivery_id: string; p_reason: string | null };
+        Returns: Json;
+      };
     };
     Enums: {
       store_member_role: StoreMemberRole;
@@ -482,6 +632,7 @@ export type Database = {
       order_fulfillment_type: OrderFulfillmentType;
       order_payment_method: OrderPaymentMethod;
       order_payment_status: OrderPaymentStatus;
+      delivery_status: DeliveryStatus;
     };
     CompositeTypes: { [_ in never]: never };
   };
@@ -501,3 +652,6 @@ export type OrderRow = Database["public"]["Tables"]["orders"]["Row"];
 export type OrderItemRow = Database["public"]["Tables"]["order_items"]["Row"];
 export type OrderItemOptionRow = Database["public"]["Tables"]["order_item_options"]["Row"];
 export type OrderEventRow = Database["public"]["Tables"]["order_events"]["Row"];
+export type DriverProfileRow = Database["public"]["Tables"]["driver_profiles"]["Row"];
+export type DeliveryRow = Database["public"]["Tables"]["deliveries"]["Row"];
+export type DeliveryEventRow = Database["public"]["Tables"]["delivery_events"]["Row"];

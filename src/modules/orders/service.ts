@@ -17,8 +17,11 @@ import type {
   StoreCheckoutSettings,
   TrackingOrder,
 } from "@/modules/orders/types";
+import type { DeliverySummary, TrackingDelivery } from "@/modules/deliveries/types";
+import { isDeliveryStatus } from "@/modules/deliveries/constants";
 import type {
   Database,
+  DeliveryStatus,
   Json,
   OrderFulfillmentType,
   OrderPaymentMethod,
@@ -128,6 +131,7 @@ function mapSummary(order: OrderRowSelected, items: OrderItemSummary[]): OrderSu
     createdAt: order.created_at,
     updatedAt: order.updated_at,
     items,
+    activeDelivery: null,
   };
 }
 
@@ -191,6 +195,112 @@ async function loadItems(
 
 const ORDER_COLUMNS =
   "id, order_number, status, payment_status, payment_method, fulfillment_type, customer_name, customer_phone, delivery_address_snapshot, notes, subtotal_cents, delivery_fee_cents, total_cents, created_at, updated_at";
+
+type DeliveryRowSelected = {
+  id: string;
+  order_id: string;
+  driver_profile_id: string;
+  status: DeliveryStatus;
+  assigned_at: string;
+  picked_up_at: string | null;
+  delivered_at: string | null;
+  canceled_at: string | null;
+  cancel_reason: string | null;
+};
+
+async function loadDeliveries(
+  supabase: Client,
+  orderIds: string[],
+  includeFinished: boolean,
+): Promise<Map<string, DeliverySummary[]>> {
+  const deliveriesByOrder = new Map<string, DeliverySummary[]>();
+
+  if (orderIds.length === 0) {
+    return deliveriesByOrder;
+  }
+
+  let query = supabase
+    .from("deliveries")
+    .select(
+      "id, order_id, driver_profile_id, status, assigned_at, picked_up_at, delivered_at, canceled_at, cancel_reason",
+    )
+    .in("order_id", orderIds)
+    .order("created_at", { ascending: true });
+
+  if (!includeFinished) {
+    query = query.in("status", ["assigned", "picked_up"]);
+  }
+
+  const { data: deliveries, error } = await query;
+
+  if (error) {
+    throw new DatabaseError("deliveries.loadForOrders", error);
+  }
+
+  const rows = (deliveries ?? []) as DeliveryRowSelected[];
+
+  if (rows.length === 0) {
+    return deliveriesByOrder;
+  }
+
+  const driverIds = [...new Set(rows.map((row) => row.driver_profile_id))];
+  const { data: drivers, error: driversError } = await supabase
+    .from("driver_profiles")
+    .select("id, display_name")
+    .in("id", driverIds);
+
+  if (driversError) {
+    throw new DatabaseError("deliveries.loadDrivers", driversError);
+  }
+
+  const driversById = new Map((drivers ?? []).map((driver) => [driver.id, driver.display_name]));
+
+  for (const row of rows) {
+    const current = deliveriesByOrder.get(row.order_id) ?? [];
+    current.push({
+      id: row.id,
+      orderId: row.order_id,
+      status: row.status,
+      driverProfileId: row.driver_profile_id,
+      driverName: driversById.get(row.driver_profile_id) ?? "Entregador",
+      assignedAt: row.assigned_at,
+      pickedUpAt: row.picked_up_at,
+      deliveredAt: row.delivered_at,
+      canceledAt: row.canceled_at,
+      cancelReason: row.cancel_reason,
+    });
+    deliveriesByOrder.set(row.order_id, current);
+  }
+
+  return deliveriesByOrder;
+}
+
+function activeDeliveryOf(deliveries: DeliverySummary[]): DeliverySummary | null {
+  return (
+    deliveries.find(
+      (delivery) => delivery.status === "assigned" || delivery.status === "picked_up",
+    ) ?? null
+  );
+}
+
+function mapTrackingDelivery(value: unknown): TrackingDelivery | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  if (!isDeliveryStatus(record.status)) {
+    return null;
+  }
+
+  return {
+    status: record.status,
+    assignedAt: typeof record.assignedAt === "string" ? record.assignedAt : null,
+    pickedUpAt: typeof record.pickedUpAt === "string" ? record.pickedUpAt : null,
+    deliveredAt: typeof record.deliveredAt === "string" ? record.deliveredAt : null,
+  };
+}
 
 export async function getCheckoutStoreBySlug(slug: string): Promise<
   | (StoreCheckoutSettings & {
@@ -288,6 +398,7 @@ export async function getTrackingOrder(params: {
 
   return {
     ...record,
+    delivery: mapTrackingDelivery(record.delivery),
     deliveryAddress: mapAddress((record.deliveryAddress ?? null) as Json | null),
     items: Array.isArray(record.items) ? record.items : [],
     events: Array.isArray(record.events) ? record.events : [],
@@ -317,14 +428,59 @@ export async function listOrdersForStore(
   }
 
   const orderRows = orders ?? [];
-  const { itemsByOrder, optionsByItem } = await loadItems(
-    supabase,
-    orderRows.map((order) => order.id),
-  );
+  const orderIds = orderRows.map((order) => order.id);
+  const [{ itemsByOrder, optionsByItem }, deliveriesByOrder] = await Promise.all([
+    loadItems(supabase, orderIds),
+    loadDeliveries(supabase, orderIds, false),
+  ]);
 
-  return orderRows.map((order) =>
-    mapSummary(order, mapItems(itemsByOrder.get(order.id) ?? [], optionsByItem)),
-  );
+  return orderRows.map((order) => {
+    const deliveries = deliveriesByOrder.get(order.id) ?? [];
+
+    return {
+      ...mapSummary(order, mapItems(itemsByOrder.get(order.id) ?? [], optionsByItem)),
+      activeDelivery: activeDeliveryOf(deliveries),
+    };
+  });
+}
+
+export async function getOrderSummariesByIds(
+  orderIds: string[],
+): Promise<Map<string, OrderSummary>> {
+  const summaries = new Map<string, OrderSummary>();
+
+  if (orderIds.length === 0) {
+    return summaries;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data: orders, error } = await supabase
+    .from("orders")
+    .select(ORDER_COLUMNS)
+    .in("id", orderIds)
+    .limit(200);
+
+  if (error) {
+    throw new DatabaseError("orders.listByIds", error);
+  }
+
+  const orderRows = orders ?? [];
+  const ids = orderRows.map((order) => order.id);
+  const [{ itemsByOrder, optionsByItem }, deliveriesByOrder] = await Promise.all([
+    loadItems(supabase, ids),
+    loadDeliveries(supabase, ids, false),
+  ]);
+
+  for (const order of orderRows) {
+    const deliveries = deliveriesByOrder.get(order.id) ?? [];
+
+    summaries.set(order.id, {
+      ...mapSummary(order, mapItems(itemsByOrder.get(order.id) ?? [], optionsByItem)),
+      activeDelivery: activeDeliveryOf(deliveries),
+    });
+  }
+
+  return summaries;
 }
 
 export async function getOrderDetailForStore(
@@ -348,6 +504,8 @@ export async function getOrderDetailForStore(
   }
 
   const { itemsByOrder, optionsByItem } = await loadItems(supabase, [order.id]);
+  const deliveriesByOrder = await loadDeliveries(supabase, [order.id], true);
+  const deliveries = deliveriesByOrder.get(order.id) ?? [];
 
   const { data: events, error: eventsError } = await supabase
     .from("order_events")
@@ -367,6 +525,8 @@ export async function getOrderDetailForStore(
 
   return {
     ...mapSummary(order, mapItems(itemsByOrder.get(order.id) ?? [], optionsByItem)),
+    activeDelivery: activeDeliveryOf(deliveries),
+    deliveries,
     events: mappedEvents,
   };
 }

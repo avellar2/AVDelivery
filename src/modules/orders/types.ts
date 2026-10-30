@@ -4,6 +4,7 @@ import type {
   OrderPaymentStatus,
   OrderStatus,
 } from "@/types/database";
+import type { DeliverySummary, TrackingDelivery } from "@/modules/deliveries/types";
 
 export type CheckoutAddress = {
   street: string;
@@ -121,13 +122,16 @@ export type OrderSummary = {
   createdAt: string;
   updatedAt: string;
   items: OrderItemSummary[];
+  activeDelivery: DeliverySummary | null;
 };
 
 export type OrderDetail = OrderSummary & {
   events: OrderEventSummary[];
+  deliveries: DeliverySummary[];
 };
 
-export type TrackingOrder = OrderDetail & {
+export type TrackingOrder = Omit<OrderDetail, "deliveries" | "activeDelivery"> & {
+  delivery: TrackingDelivery | null;
   store: {
     name: string;
     slug: string;

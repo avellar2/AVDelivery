@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   ROLE_LABELS,
   STORE_ROLES,
+  canAssignDeliveries,
+  canManageDrivers,
   canManageMembers,
   canManageMenu,
   canManageSettings,
   canToggleStoreActive,
+  isDriver,
   isStoreMemberRole,
   roleLabel,
 } from "@/modules/memberships/roles";
@@ -47,6 +50,25 @@ describe("papéis de estabelecimento", () => {
     expect(canToggleStoreActive("manager")).toBe(false);
     expect(canToggleStoreActive("employee")).toBe(false);
     expect(canToggleStoreActive("driver")).toBe(false);
+  });
+
+  it("permite gerenciar e atribuir entregas apenas para proprietário e gerente", () => {
+    for (const role of ["owner", "manager"] as const) {
+      expect(canManageDrivers(role)).toBe(true);
+      expect(canAssignDeliveries(role)).toBe(true);
+    }
+
+    for (const role of ["employee", "driver"] as const) {
+      expect(canManageDrivers(role)).toBe(false);
+      expect(canAssignDeliveries(role)).toBe(false);
+    }
+  });
+
+  it("reconhece apenas o papel de entregador como entregador", () => {
+    expect(isDriver("driver")).toBe(true);
+    expect(isDriver("employee")).toBe(false);
+    expect(isDriver("manager")).toBe(false);
+    expect(isDriver(null)).toBe(false);
   });
 
   it("traduz todos os papéis", () => {

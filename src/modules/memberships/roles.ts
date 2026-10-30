@@ -44,3 +44,15 @@ export function canCancelOrders(role: StoreMemberRole): boolean {
 export function canManagePayments(role: StoreMemberRole): boolean {
   return role === "owner" || role === "manager";
 }
+
+export function canManageDrivers(role: StoreMemberRole): boolean {
+  return role === "owner" || role === "manager";
+}
+
+export function canAssignDeliveries(role: StoreMemberRole): boolean {
+  return role === "owner" || role === "manager";
+}
+
+export function isDriver(role: StoreMemberRole | null): boolean {
+  return role === "driver";
+}

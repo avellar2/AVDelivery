@@ -54,6 +54,8 @@ src/
       configuracoes/           edição dos dados públicos e do checkout da loja
       produtos/                painel do cardápio (produtos/categorias/adicionais)
       pedidos/                 fila e operação de pedidos
+      entregadores/            cadastro e ativação de entregadores
+    entregador/                painel mobile do entregador (próprias entregas)
     admin/
       layout.tsx               proteção de superadministrador
       page.tsx                 lista global de estabelecimentos
@@ -66,12 +68,14 @@ src/
     menu/                      prévia interativa de adicionais
     storefront/                cardápio, carrinho/checkout e acompanhamento
     dashboard/                 fila de pedidos
+    deliveries/                gestão de entregadores e painel mobile do entregador
   modules/
     auth/                      sessão, validações, Server Actions, site URL
     memberships/               papéis, resolução de loja ativa, consultas, guard
     stores/                    contexto do painel, consultas, validações, ações
     menu/                      validações, imagens, consultas, ações, tipos
     orders/                    carrinho, preços, payload, idempotência, RPCs e ações
+    deliveries/                entregadores, entregas, RPCs, regras e ações
     dashboard/                 definição da navegação
     platform-admin/            guard e consultas globais
   lib/
@@ -195,7 +199,8 @@ cookies de sessão**. Consequências:
   diferente gera conflito.
 - O painel `/dashboard/pedidos` lê pela sessão do usuário (RLS exige owner/manager/employee).
   Avanço de status e pagamento passam por `update_order_status` e `update_order_payment_status`, que
-  validam papel, transição e concorrência (`select ... for update`). `driver` não acessa pedidos.
+  validam papel, transição e concorrência (`select ... for update`). `driver` não acessa a fila; lê
+  apenas os pedidos com entrega atribuída a ele (Etapa 4).
 - O acompanhamento público usa slug + número + hash SHA-256 de um token de 32 bytes. O token viaja
   no fragmento `#t=...` e é lido no cliente; o banco não guarda o valor bruto.
 - A página pública e o painel não usam Realtime do Supabase: os cookies são `httpOnly` e as tabelas
@@ -203,6 +208,33 @@ cookies de sessão**. Consequências:
   com ressincronização ao voltar para a aba e botão manual. O PostgreSQL é a fonte de verdade.
 
 Detalhes de fluxo, máquina de estados, idempotência e limitações: [orders.md](orders.md).
+
+## Entregas
+
+- `src/modules/deliveries` concentra regras de estado, consultas, Server Actions e o resolvedor de
+  loja do entregador. A escrita passa exclusivamente pelas RPCs `create_driver`, `update_driver`,
+  `assign_delivery`, `reassign_delivery`, `start_delivery`, `complete_delivery` e
+  `cancel_delivery` — todas `security definer` com `search_path = ''`, validando sessão, papel,
+  loja, estado e concorrência.
+- `/dashboard/entregadores` (owner/manager) vincula uma **conta existente** como `driver`, cria o
+  `driver_profiles` e permite editar/ativar/desativar. Não há convite por e-mail: a ausência de
+  conta é reportada, nunca simulada.
+- A atribuição acontece no detalhe do pedido em `/dashboard/pedidos`. Reatribuir encerra a entrega
+  anterior com motivo obrigatório e cria outra; o entregador anterior perde o acesso na hora, tanto
+  na RPC quanto na RLS.
+- `/entregador` é um painel mobile-first sem cliente Supabase no browser: lista as próprias
+  entregas, inicia a coleta (`ready → out_for_delivery`) e confirma a entrega
+  (`out_for_delivery → delivered`) na mesma transação da entrega.
+- `orders` ganhou uma política de leitura restrita ao entregador com entrega `assigned`,
+  `picked_up` ou `delivered`; itens e adicionais seguem a mesma regra. Clientes e eventos de outros
+  pedidos continuam invisíveis.
+- O acompanhamento público recebe apenas o estado da entrega e os horários; nome, telefone e
+  posição do entregador nunca são expostos.
+- O fluxo manual da Etapa 3 continua válido: um trigger sincroniza entregas quando a loja cancela
+  ou conclui o pedido diretamente.
+
+Sem GPS, mapa, rota ou aplicativo nativo nesta etapa. Pontos de integração futura estão descritos
+em [deliveries.md](deliveries.md).
 
 ## Decisões técnicas
 
@@ -271,10 +303,12 @@ para `store_id`.
 
 **Etapas 1 e 2 homologadas em 2026-10-29** em projeto Supabase remoto exclusivo de testes: 90 testes
 Vitest (unitários + 27 integrações com Auth/PostgREST/Storage), 12 E2E, build, DB lint e advisors de
-segurança (sem avisos de `SECURITY DEFINER`). Pendências não bloqueantes: HIBP, entrega real de
-e-mail e rotação após expiração de 1h.
+segurança. Pendências não bloqueantes: HIBP, entrega real de e-mail e rotação após expiração de 1h.
 
-**Etapa 3 implementada**, com validação local concluída (typecheck, lint, 104 testes Vitest e
-build). As três migrações de pedidos ainda não foram aplicadas ao projeto de testes e a suíte de
-integração/E2E de pedidos não foi executada por falta de credenciais; portanto a etapa **não está
-homologada**. Ver [orders.md](orders.md) e [homologation.md](homologation.md).
+**Etapa 3 homologada em 2026-10-30**: 9 migrações aplicadas sem `reset`, 149 testes Vitest (45 de
+integração) e 13 E2E. Ver [orders.md](orders.md).
+
+**Etapa 4 homologada em 2026-10-30**: 12 migrações aplicadas sem `reset`, 179 testes Vitest (59 de
+integração) e 14 E2E, incluindo o fluxo completo de entrega em mobile, reatribuição com revogação de
+acesso, concorrência e isolamento entre lojas. Ver [deliveries.md](deliveries.md) e
+[homologation.md](homologation.md).

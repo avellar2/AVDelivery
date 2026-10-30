@@ -20,6 +20,13 @@
 | Consulta arbitrária de pedido por ID/número | token de 32 bytes; banco guarda só SHA-256; busca exige slug + número + hash |
 | Vazamento do token por referer/log/analytics | token no fragmento da URL, lido no cliente; sem logs e com noindex |
 | Abuso de checkout | rate limit por IP/loja + limites por telefone no banco |
+| Entregador ver pedidos/clientes de outra loja | RLS por vínculo `driver` + perfil ativo + entregas do próprio usuário |
+| Entregador manter acesso após reatribuição/cancelamento | entrega anterior vira `canceled`; RLS exige entrega ativa ou entregue |
+| Entregador ver dados financeiros/configurações | painel `/entregador` restrito; RLS não concede `stores`/cardápio/pagamento |
+| Duas entregas ativas no mesmo pedido (corrida) | índice parcial único + lock do pedido antes da entrega |
+| Loja A atribuir entregador da Loja B | FK composta `(store_id, ...)` + validação na RPC |
+| Escalada de `driver` para outro papel mantendo perfil | trigger bloqueia troca de papel com perfil existente |
+| Dados do entregador expostos ao cliente | `get_order_tracking` devolve só estado/horários, sem identidade |
 
 ## Fronteiras de confiança
 
@@ -157,7 +164,8 @@ Nenhuma dessas tabelas tem grant de escrita para `anon` ou `authenticated`.
 
 - As políticas usam `private.has_store_role(store_id, ['owner','manager','employee'])` ou
   `private.is_platform_admin()`.
-- `driver` não lê pedidos nesta etapa.
+- `driver` não lê clientes nem a fila da loja; a partir da Etapa 4 lê apenas pedidos, itens e
+  adicionais de entregas ativas dele (ou já entregues por ele), sem `order_events`.
 - `create_order` e `get_order_tracking` são executáveis por `anon` e `authenticated` porque o
   checkout e o acompanhamento são públicos. A função de criação só grava um pedido validado na loja
   ativa, recalcula todos os preços e não devolve dados de outros pedidos; a de acompanhamento exige
@@ -176,6 +184,36 @@ Nenhuma dessas tabelas tem grant de escrita para `anon` ou `authenticated`.
   `private.guard_order_event_insert()` congelam dados comerciais e impedem mistura de `store_id`.
 - Os telefones/endereços de clientes ficam restritos ao tenant e não aparecem na página pública do
   cardápio.
+
+### Entregas (Etapa 4)
+
+RLS habilitado em `driver_profiles`, `deliveries` e `delivery_events`. Nenhuma dessas tabelas tem
+grant de escrita para `anon` ou `authenticated`: a única porta de escrita são as RPCs
+`SECURITY DEFINER` com `search_path = ''`.
+
+| Tabela            | Leitura                                                                        | Escrita                                    |
+| ----------------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
+| `driver_profiles` | owner/manager/employee, admin ou o próprio usuário                             | `create_driver` / `update_driver`          |
+| `deliveries`      | owner/manager/employee, admin ou entregador dono com perfil ativo              | RPCs de atribuição/início/fim/cancelamento |
+| `delivery_events` | idem à entrega                                                                 | RPCs de entrega (somente `INSERT`)         |
+| `orders` / itens  | leitura adicional do entregador com entrega `assigned`/`picked_up`/`delivered` | RPCs de pedido/entrega                     |
+
+- O papel `driver` é revalidado nas políticas e nas RPCs; um perfil desativado perde o acesso
+  operacional (`driver_inactive`) e a leitura.
+- A entrega é a prova de vínculo: reatribuir ou cancelar muda o status e a RLS deixa de mostrar o
+  pedido ao entregador anterior imediatamente.
+- `delivery_events` é append-only: `UPDATE` é recusado por trigger, não há grant de escrita para
+  roles da API e a exclusão fica restrita ao `service_role` para limpeza de fixtures.
+- Atribuir/reassignar validam que o entregador pertence à mesma loja, está ativo e ainda tem vínculo
+  `driver`; a FK composta impede referência cruzada mesmo em caminho privilegiado.
+- O índice parcial `deliveries_one_active_per_order_idx` mais o lock `FOR UPDATE` do pedido
+  garantem uma única entrega ativa sob concorrência.
+- `get_order_tracking` foi estendida com `delivery.status` e horários — **sem** nome, telefone ou
+  posição do entregador.
+- O painel `/entregador` não lê `stores`, cardápio, `customers` nem pagamentos; o nome/telefone do
+  cliente aparecem somente dentro do pedido atribuído.
+- `src/lib/supabase/admin.ts` usa `service_role` e é `server-only`, restrito a fluxos
+  administrativos internos (cadastro por e-mail); nunca é importado por componente de cliente.
 
 ### Rate limit e abuso
 
@@ -405,10 +443,11 @@ endereços nunca são logados.
 9. **Sem paginação no admin** — consulta limitada a 200 lojas.
 10. **Segurança do projeto Supabase** (acesso ao dashboard, chaves, backups) é parte da fronteira de
     confiança e deve ser protegida com MFA e rotação de chaves.
-11. **Homologação concluída em 2026-10-29 (Etapas 1 e 2) e 2026-10-30 (Etapa 3)** — 45 integrações
-    com Auth/PostgREST/Storage, 149 testes Vitest e 13 E2E, incluindo login/logout, recuperação,
-    cardápio/uploads e o fluxo completo de pedidos. Pendências não bloqueantes: HIBP, entrega real
-    de e-mail e rotação após expiração de 1h. Ver [homologation.md](homologation.md).
+11. **Homologação concluída em 2026-10-29 (Etapas 1 e 2) e 2026-10-30 (Etapas 3 e 4)** — 59
+    integrações com Auth/PostgREST/Storage, 179 testes Vitest e 14 E2E, incluindo login/logout,
+    recuperação, cardápio/uploads, o fluxo completo de pedidos e o fluxo de entrega. Pendências não
+    bloqueantes: HIBP, entrega real de e-mail e rotação após expiração de 1h. Ver
+    [homologation.md](homologation.md).
 12. **Bucket público** — imagens continuam acessíveis por URL mesmo após desativação; não usar para
     conteúdo privado.
 13. **Capacidade de grupos** — a consistência mínimo/máximo × opções é garantida nas ações do app e
@@ -426,6 +465,13 @@ endereços nunca são logados.
 18. **Etapa 3 homologada em 2026-10-30** — migrações aplicadas, 45 testes de integração e 13 E2E
     executados no projeto de testes; grants e políticas das RPCs de pedidos conferidos no banco.
     Ver [homologation.md](homologation.md).
+19. **Etapa 4 homologada em 2026-10-30** — 3 migrações novas aplicadas (12 no total), 14 testes de
+    integração e 14 E2E (fluxo de entrega em 12 passos); RLS, grants e concorrência das RPCs de
+    entrega conferidos no banco.
+20. **Cadastro de entregador sem convite** — o vínculo exige uma conta já existente criada pelo
+    administrador; não há envio de e-mail nem convite por token.
+21. **Sem GPS/rastreamento** — o acompanhamento mostra apenas estado e horários da entrega; não há
+    posição, mapa, rota ou histórico de localização.
 
 ## Checklist operacional
 
@@ -436,9 +482,11 @@ endereços nunca são logados.
 - [x] Bucket `product-images` criado com limite/MIME e políticas por loja.
 - [x] `service_role` fora do browser e não exposta no cliente.
 - [x] Superadministrador criado por script, com senha forte.
-- [x] 27 testes de integração executados e verdes em Supabase real.
-- [x] Login, logout, recuperação, cardápio, RLS de imagem e uploads validados.
-- [x] Etapa 3 validada localmente: typecheck, lint, 104 testes Vitest e build.
-- [ ] Aplicar as migrações de pedidos e executar integração/E2E da Etapa 3 no Supabase de testes.
+- [x] 59 testes de integração executados e verdes em Supabase real.
+- [x] Login, logout, recuperação, cardápio, RLS de imagem, uploads, pedidos e entregas validados.
+- [x] Etapa 3 validada localmente: typecheck, lint e build.
+- [x] Migrações de pedidos aplicadas e integração/E2E da Etapa 3 executados no Supabase de testes.
+- [x] Etapa 4: migrações de entregas aplicadas, RLS e grants conferidos, 14 integrações e E2E verdes.
+- [x] `service_role` usada apenas em scripts e em `src/lib/supabase/admin.ts` (server-only).
 - [ ] Habilitar leaked password protection (HIBP) no dashboard.
 - [ ] Backups automáticos habilitados no Supabase de produção.

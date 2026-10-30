@@ -1,4 +1,9 @@
-import { canManageMenu, canManageSettings, canOperateOrders } from "@/modules/memberships/roles";
+import {
+  canAssignDeliveries,
+  canManageMenu,
+  canManageSettings,
+  canOperateOrders,
+} from "@/modules/memberships/roles";
 import type { StoreMemberRole } from "@/types/database";
 
 export type DashboardNavItem = {
@@ -14,6 +19,8 @@ export function getDashboardNavItems(role: StoreMemberRole | null): DashboardNav
   const canManage = role ? canManageSettings(role) : false;
   const canManageProducts = role ? canManageMenu(role) : false;
   const canOperate = role ? canOperateOrders(role) : false;
+  const canDeliver = role ? canAssignDeliveries(role) : false;
+  const isDriverRole = role === "driver";
 
   return [
     {
@@ -41,10 +48,11 @@ export function getDashboardNavItems(role: StoreMemberRole | null): DashboardNav
     },
     {
       key: "deliveries",
-      label: "Entregas",
-      href: null,
-      available: false,
-      description: "Rotas e entregadores",
+      label: isDriverRole ? "Minhas entregas" : "Entregas",
+      href: isDriverRole ? "/entregador" : canDeliver ? "/dashboard/entregadores" : null,
+      available: isDriverRole || canDeliver,
+      locked: !isDriverRole && !canDeliver,
+      description: isDriverRole ? "Suas entregas atribuídas" : "Entregadores e atribuições",
     },
     {
       key: "staff",

@@ -3,11 +3,13 @@ import { redirect } from "next/navigation";
 import { Alert } from "@/components/ui/alert";
 import { OrdersBoard } from "@/components/dashboard/orders-board";
 import {
+  canAssignDeliveries,
   canCancelOrders,
   canManagePayments,
   canOperateOrders,
   roleLabel,
 } from "@/modules/memberships/roles";
+import { listDriversForStore } from "@/modules/deliveries/service";
 import { listOrdersForStore } from "@/modules/orders/service";
 import { getDashboardContext } from "@/modules/stores/active-store";
 
@@ -40,13 +42,17 @@ export default async function OrdersPage() {
   }
 
   const orders = await listOrdersForStore(membership.storeId, null);
+  const canManageDeliveries = canAssignDeliveries(membership.role);
+  const drivers = canManageDeliveries ? await listDriversForStore(membership.storeId) : [];
 
   return (
     <OrdersBoard
       storeName={membership.storeName}
       initialOrders={orders}
+      initialDrivers={drivers}
       canCancel={canCancelOrders(membership.role)}
       canManagePayments={canManagePayments(membership.role)}
+      canManageDeliveries={canManageDeliveries}
     />
   );
 }

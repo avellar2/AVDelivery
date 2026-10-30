@@ -3,13 +3,14 @@
 Plataforma SaaS multiempresa de delivery para hamburguerias, pizzarias, lanchonetes e restaurantes.
 Comercialização por assinatura mensal por estabelecimento, sem comissão por pedido.
 
-**Status atual: Etapas 1, 2 e 3 homologadas** em projeto Supabase exclusivo de testes
+**Status atual: Etapas 1, 2, 3 e 4 homologadas** em projeto Supabase exclusivo de testes
 (2026-10-29 e 2026-10-30).
 
 A plataforma entrega autenticação, isolamento multiempresa por RLS, painel do estabelecimento,
 superadministrador, cardápio digital com categorias/produtos/adicionais e imagens, página pública
 mobile-first, carrinho, checkout sem login, criação transacional e idempotente de pedidos, painel de
-operação e acompanhamento por link com token. Entregas, GPS e cobrança ainda não fazem parte.
+operação, acompanhamento por link com token, cadastro de entregadores, atribuição manual e painel
+mobile do entregador. GPS, aplicativo nativo e cobrança por assinatura ainda não fazem parte.
 
 > Resultados reais, correções e pendências não bloqueantes: [docs/homologation.md](docs/homologation.md).
 
@@ -99,6 +100,10 @@ As migrações versionadas ficam em `supabase/migrations` e devem ser aplicadas 
    de checkout.
 8. `20261029140100_orders_security.sql` — RLS e grants das tabelas de pedido.
 9. `20261029140200_orders_functions.sql` — criação transacional, acompanhamento e máquina de estados.
+10. `20261030120000_deliveries_schema.sql` — perfis de entregador, entregas e histórico de entrega.
+11. `20261030120100_deliveries_security.sql` — RLS, grants e leitura de pedidos pelo entregador.
+12. `20261030120200_deliveries_functions.sql` — RPCs de entregador/entrega e acompanhamento com
+    estado da entrega.
 
 Com Supabase CLI:
 
@@ -196,6 +201,8 @@ npm run dev
 - `/dashboard` — painel da loja
 - `/dashboard/produtos` — gestão do cardápio (owner/manager)
 - `/dashboard/pedidos` — fila e operação de pedidos (owner/manager/employee)
+- `/dashboard/entregadores` — cadastro e ativação de entregadores (owner/manager)
+- `/entregador` — painel mobile do entregador (próprias entregas)
 - `/dashboard/configuracoes` — dados públicos e checkout da loja (owner/manager)
 - `/admin` — superadministrador
 - `/loja/[slug]` — cardápio público, carrinho e checkout
@@ -243,6 +250,25 @@ A rota usa a sessão do usuário e as políticas de Storage; nunca usa `service_
 
 Detalhes: [docs/orders.md](docs/orders.md).
 
+## Entregas
+
+- Cadastro em `/dashboard/entregadores`: owner/manager vincula uma **conta existente** como
+  entregador, cria o vínculo `driver` e o perfil na mesma transação. Não há convite por e-mail;
+  conta inexistente gera erro explícito.
+- Atribuição, reatribuição (com motivo) e cancelamento da atribuição no detalhe do pedido. Só existe
+  uma entrega ativa por pedido (índice parcial único + lock no banco).
+- Reatribuir encerra a entrega anterior e revoga imediatamente o acesso do entregador anterior, na
+  RPC e na RLS.
+- `/entregador` é mobile-first: lista as próprias entregas, inicia a coleta
+  (`ready → out_for_delivery`) e confirma a entrega (`out_for_delivery → delivered`) na mesma
+  transação do pedido.
+- O acompanhamento público mostra o estado e os horários da entrega, sem nome, telefone ou posição do
+  entregador.
+- Desativar um entregador com entregas ativas é bloqueado até que elas sejam resolvidas.
+- Sem GPS, mapa, rota, aplicativo nativo ou despacho automático nesta etapa.
+
+Detalhes: [docs/deliveries.md](docs/deliveries.md).
+
 ## Testes
 
 ```bash
@@ -252,10 +278,10 @@ npm test                 # unitários + integração (integração é ignorada s
 npm run test:e2e         # requer: npx playwright install chromium
 ```
 
-Situação atual: **149 testes Vitest aprovados** (17 arquivos), incluindo os 27 testes de integração
-da Fundação/cardápio e os 18 de pedidos, executados com `SUPABASE_TEST_*`. A suíte E2E tem **13/13**
-aprovados, incluindo o fluxo completo de pedidos (entrega e retirada/Pix) em mobile. O detalhamento
-está em [docs/homologation.md](docs/homologation.md).
+Situação atual: **179 testes Vitest aprovados** (19 arquivos), incluindo os 59 testes de integração
+da Fundação/cardápio, pedidos e entregas, executados com `SUPABASE_TEST_*`. A suíte E2E tem
+**14/14** aprovados, incluindo os fluxos completos de pedidos (entrega e retirada/Pix) e de entrega
+em mobile. O detalhamento está em [docs/homologation.md](docs/homologation.md).
 
 O Vitest e o Playwright carregam `.env.local` automaticamente. O E2E autenticado da Fundação
 (`tests/e2e/homologation.spec.ts`) é ignorado quando as credenciais `DEMO_*`/`SUPERADMIN_*` não estão
@@ -309,8 +335,23 @@ Cobertura de isolamento em `tests/integration/rls.test.ts`:
 - rate limit por telefone.
 
 O E2E `tests/e2e/orders.spec.ts` percorre o fluxo completo em viewport mobile (cardápio → carrinho →
-checkout → confirmação → painel do owner → todos os status → acompanhamento → isolamento da Loja B),
-mas ainda não foi executado contra Supabase real.
+checkout → confirmação → painel do owner → todos os status → acompanhamento → isolamento da Loja B).
+
+`tests/integration/deliveries.test.ts` cobre entregas (ignorado sem `SUPABASE_TEST_*`):
+
+- cadastro de entregador, conflitos de papel/perfil e perfil isolado por loja;
+- atribuição com evento, leitura do pedido pelo entregador e negação de clientes;
+- início sem pedido pronto, entregador errado, idempotência e coleta obrigatória;
+- conclusão com sincronização do pedido e acompanhamento sem dados do entregador;
+- reatribuição com motivo, revogação do entregador anterior e cancelamento antes da coleta;
+- concorrência de atribuição e de conclusão, desativação e reativação;
+- isolamento entre lojas, fluxo manual, remoção de vínculo, escrita direta negada e histórico
+  imutável.
+
+O E2E `tests/e2e/deliveries.spec.ts` executa 12 passos: cadastro pela loja, pedido até `ready`,
+atribuição, login mobile do entregador, início, acompanhamento do cliente, visão da loja,
+confirmação, histórico, consistência no banco, isolamento de outra loja e ausência de dados do
+entregador no link público.
 
 ## Scripts
 
@@ -332,9 +373,9 @@ mas ainda não foi executado contra Supabase real.
 
 ```text
 src/
-  app/                  rotas (auth, dashboard, admin, loja pública e acompanhamento, API de imagem)
-  components/           UI, layout, cardápio/carrinho, acompanhamento e fila de pedidos
-  modules/              domínio: auth, stores, memberships, menu, orders, dashboard, platform-admin
+  app/                  rotas (auth, dashboard, entregador, admin, loja pública e acompanhamento, API de imagem)
+  components/           UI, layout, cardápio/carrinho, acompanhamento, fila de pedidos e entregas
+  modules/              domínio: auth, stores, memberships, menu, orders, deliveries, dashboard, platform-admin
   lib/                  Supabase, validação de env, erros, redirects, utilitários
   types/database.ts     tipos do schema (mantidos manualmente nesta etapa)
 supabase/migrations/    SQL versionado
@@ -356,7 +397,10 @@ docs/                   arquitetura, dados, segurança, homologação e roadmap
   no servidor; políticas de Storage por loja para upload/exclusão.
 - Checkout: a RPC recalcula preços no banco, valida disponibilidade/grupos/mínimo e ignora totais do
   navegador; criação transacional e idempotente.
-- Pedidos: RLS restrita a owner/manager/employee; escritas apenas por RPC; `driver` sem acesso.
+- Pedidos: RLS restrita a owner/manager/employee; escritas apenas por RPC; `driver` lê somente os
+  pedidos com entrega atribuída a ele.
+- Entregas: RLS por vínculo `driver` e entrega ativa; reatribuição revoga o acesso; histórico
+  imutável; uma entrega ativa por pedido garantida no banco.
 - Acompanhamento por token de 32 bytes (SHA-256 no banco, fragmento da URL, `noindex`); sem consulta
   por ID/número.
 - Rate limit por IP + loja e por telefone no banco; sem CAPTCHA.
@@ -372,6 +416,7 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - [Modelo de dados](docs/data-model.md)
 - [Segurança](docs/security.md)
 - [Pedidos](docs/orders.md)
+- [Entregas](docs/deliveries.md)
 - [Homologação](docs/homologation.md)
 - [Roadmap](docs/roadmap.md)
 
@@ -390,8 +435,11 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - Sem carrinho off-line ou sincronização entre dispositivos: o carrinho fica no `localStorage`.
 - Sem gateway de pagamento, cobrança automática, conciliação, impressão térmica, cupom ou desconto.
 - Pix é manual e nunca é marcado como pago automaticamente.
-- Sem GPS, aplicativo de entregador, atribuição de entregador ou rastreamento.
-- Atualização de pedidos por polling (15 s no painel, 12 s no acompanhamento), não por push/Realtime.
+- Sem GPS, rastreamento em tempo real, mapa, rota ou aplicativo nativo do entregador.
+- Atribuição de entregador manual; sem despacho automático, comprovante com foto/assinatura ou
+  repasse financeiro. O cadastro exige conta existente (sem convite por e-mail).
+- Atualização de pedidos e entregas por polling (15 s no painel, 12 s no acompanhamento), não por
+  push/Realtime.
 - Rate limit em memória é por instância; os limites por telefone no banco são compartilhados.
 - Lista de pedidos limitada a 200 por consulta, sem paginação.
 - Sem paginação na lista administrativa de lojas (limite de 200).
@@ -401,11 +449,12 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - Entrega real de e-mail de recuperação não verificada (fluxo validado via token); configurar
   SMTP para produção.
 - Rotação de token após a expiração de 1h não simulada; persistência de sessão em reload verificada.
-- **Etapa 3 homologada em 2026-10-30** no projeto de testes; os itens de lançamento comercial
-  (gateway de pagamento, push, rate limit distribuído, paginação, GPS/entregadores, impressão,
-  cupons, agendamento e notificações) continuam pendentes.
+- **Etapa 4 homologada em 2026-10-30** no projeto de testes; os itens de lançamento comercial
+  (gateway de pagamento, push, rate limit distribuído, paginação, GPS/rastreamento, aplicativo
+  nativo, impressão, cupons, agendamento, notificações e repasse ao entregador) continuam
+  pendentes.
 
 ## Próxima etapa recomendada
 
-A Etapa 3 está homologada. A Etapa 4 — Entregas, conforme [docs/roadmap.md](docs/roadmap.md),
-permanece como próximo escopo e não foi iniciada.
+As Etapas 1 a 4 estão homologadas. A Etapa 5 — Assinatura e cobrança, conforme
+[docs/roadmap.md](docs/roadmap.md), permanece como próximo escopo e não foi iniciada.

@@ -106,17 +106,38 @@ Critério de pronto: **atendido** — pedido criado na página pública apareceu
 correta, e somente nela, com criação transacional, idempotente e concorrência validadas contra o
 Supabase real.
 
-## Etapa 4 — Entregas
+## Etapa 4 — Entregas (homologada em 2026-10-30)
+
+> **Estado:** implementada e homologada em Supabase real: 12 migrações aplicadas sem `reset`, 179
+> testes Vitest (59 de integração) e 14 E2E aprovados, incluindo o fluxo de entrega em 12 passos em
+> viewport mobile. Resultados e pendências em [homologation.md](homologation.md) e
+> [deliveries.md](deliveries.md).
 
 Objetivo: organizar entrega própria.
 
-Escopo:
+Entregue:
 
-- Tabela `deliveries` (pedido, entregador, endereço, status).
-- Visão do papel `driver` no painel.
-- Atribuição manual de entregador, sem rastreamento GPS contínuo nesta fase.
-- Histórico e comprovante simples.
-- Testes de permissão: `driver` não acessa pedidos financeiros nem configurações.
+- [x] Tabelas `driver_profiles`, `deliveries` e `delivery_events`, com FKs compostas por loja,
+      histórico imutável e índice parcial de uma entrega ativa por pedido.
+- [x] Cadastro de entregador em `/dashboard/entregadores` (owner/manager) vinculando uma conta
+      existente, com ativação/desativação e bloqueio de desativação com entregas ativas.
+- [x] Atribuição, reatribuição (com motivo) e cancelamento de atribuição no detalhe do pedido.
+- [x] Painel mobile-first `/entregador` com entregas em andamento e histórico, início da coleta e
+      confirmação da entrega.
+- [x] Estados de entrega `assigned`, `picked_up`, `delivered`, `canceled`, com atualização atômica
+      do pedido (`ready → out_for_delivery → delivered`) e eventos nas duas tabelas.
+- [x] Reatribuição revoga imediatamente o acesso operacional e de dados do entregador anterior.
+- [x] Acompanhamento do cliente mostra apenas o estado e os horários da entrega, sem dados do
+      entregador.
+- [x] RLS de menor privilégio: entregador lê somente as próprias entregas e os pedidos vinculados.
+- [x] Testes unitários, de integração (concorrência, isolamento, revogação) e E2E de 12 passos.
+- [x] Pontos de integração futura com GPS documentados, sem implementação.
+
+Fora do escopo desta etapa: GPS/rastreamento em tempo real, aplicativo nativo, despacho automático,
+comprovante com foto/assinatura e repasse financeiro ao entregador.
+
+Critério de pronto: **atendido** — atribuição real, acesso do entregador, início/fim, estados
+consistentes, acompanhamento do cliente e isolamento entre lojas validados contra o Supabase real.
 
 ## Etapa 5 — Assinatura e cobrança
 

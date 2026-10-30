@@ -2,11 +2,11 @@
 
 ## Status
 
-**Etapas 1 e 2 homologadas em 2026-10-29; Etapa 3 homologada em 2026-10-30**, com um item de
+**Etapas 1 e 2 homologadas em 2026-10-29; Etapas 3 e 4 homologadas em 2026-10-30**, com um item de
 endurecimento não bloqueante pendente (proteção de senhas vazadas, configuração manual no painel).
 
-A Etapa 3 foi validada contra o projeto Supabase real de homologação, com migrações aplicadas,
-integração, E2E e revisão visual em desktop e mobile. Detalhes na seção final.
+As Etapas 3 e 4 foram validadas contra o projeto Supabase real de homologação, com migrações
+aplicadas, integração, E2E e revisão visual em desktop e mobile. Detalhes nas seções finais.
 
 A Etapa 1 está detalhada abaixo; a homologação da Etapa 2 está na seção seguinte.
 
@@ -402,3 +402,139 @@ npx supabase db advisors --linked --type security
 
 Nunca aponte `SUPABASE_TEST_*` para produção: a suíte cria e remove usuários, lojas, cardápio e
 pedidos. As credenciais ficam apenas em `.env.local`.
+
+## Homologação da Etapa 4 — Entregas
+
+**HOMOLOGADA em 2026-10-30** no projeto Supabase exclusivo de testes
+(`jtryfpaxocdiqrehptlz`). Nenhum banco de produção foi acessado, nenhum `reset` remoto foi
+executado e nenhuma migração já aplicada foi editada ou reaplicada.
+
+### Migrações aplicadas
+
+- `20261030120000_deliveries_schema.sql`
+- `20261030120100_deliveries_security.sql`
+- `20261030120200_deliveries_functions.sql`
+
+O `db push --dry-run` listou exatamente as três migrações pendentes. Foram aplicadas com
+`db push --linked`; o histórico remoto passou a ter **12 migrações**, e as 9 anteriores permaneceram
+intocadas. O schema passou no `db lint` sem erros.
+
+### Resultados reais
+
+| Verificação            | Resultado                                                               |
+| ---------------------- | ----------------------------------------------------------------------- |
+| `npm run typecheck`    | OK                                                                      |
+| `npm run lint`         | OK, sem avisos                                                          |
+| `npm run format:check` | OK                                                                      |
+| `npm test`             | **179/179** (19 arquivos), com integração Supabase habilitada           |
+| `npm run test:e2e`     | **14/14**                                                               |
+| `npm run build`        | OK, inclui `/dashboard/entregadores` e `/entregador`                    |
+| `supabase db lint`     | nenhum erro de schema                                                   |
+| Security Advisors      | executado; 12 avisos revisados (11 intencionais + HIBP), nenhum crítico |
+
+Integração: **59/59** testes com Supabase real — 45 anteriores (Fundação, cardápio e pedidos) + 14
+de entregas (`tests/integration/deliveries.test.ts`). Os 14 cobrem cadastro e conflitos de perfil,
+isolamento e negação a `anon`, atribuição com evento, leitura do pedido pelo entregador, bloqueio de
+clientes, início com pedido não pronto, entregador errado, idempotência, conclusão e acompanhamento
+sem nome do entregador, coleta obrigatória, reatribuição com motivo e revogação, cancelamento antes
+da coleta, concorrência, desativação, isolamento entre lojas, fluxo manual, remoção de vínculo,
+escrita direta negada e histórico imutável.
+
+E2E de entregas (`tests/e2e/deliveries.spec.ts`), 12 passos em Chromium:
+
+1. owner vincula o entregador em `/dashboard/entregadores` por e-mail;
+2. pedido criado pela página pública é avançado até `ready` pela fila;
+3. owner atribui o entregador e vê "Atribuída";
+4. entregador entra em viewport 390×844, vê o pedido e o cliente, sem overflow horizontal;
+5. "Iniciar entrega" leva a "Em rota";
+6. cliente acompanha a coleta e não vê o nome do entregador;
+7. owner atualiza e vê "Em rota";
+8. entregador confirma a entrega (diálogo) e vê o histórico "Entregue";
+9. cliente vê "Entrega concluída" e "Acompanhamento encerrado";
+10. banco confirma `deliveries.status = delivered`, horários e eventos
+    `['assigned','picked_up','delivered']`, e `orders.status = delivered`;
+11. entregador e owner de outra loja não veem os dados;
+12. o link público não contém nome do entregador nem "motorista".
+
+### Segurança e concorrência verificadas no banco real
+
+- **RLS habilitada** em `driver_profiles`, `deliveries` e `delivery_events`, sem grant de escrita para
+  `anon`/`authenticated`; toda mutação passa pelas RPCs `SECURITY DEFINER` com `search_path = ''`.
+- **Leitura do entregador**: `orders`, `order_items` e `order_item_options` só aparecem com entrega
+  `assigned`/`picked_up`/`delivered` do próprio perfil ativo e vínculo `driver`; `customers` e
+  `order_events` continuam inacessíveis.
+- **Reatribuição**: encerra a entrega anterior (`canceled`, motivo registrado), cria outra
+  `assigned` e grava dois eventos; o entregador anterior recebe `forbidden` nas RPCs e deixa de ver
+  o pedido imediatamente.
+- **Índice parcial único** `deliveries_one_active_per_order_idx` + lock do pedido antes da entrega:
+  em duas atribuições simultâneas, exatamente uma vence e a outra recebe `active_delivery_exists`.
+- **Conclusão concorrente**: duas chamadas simultâneas retornam `changed` `[false, true]` e geram um
+  único evento `delivered` no pedido.
+- **Integridade**: FKs compostas impedem entregador de outra loja (`driver_cross_store`); vínculo
+  removido gera `driver_not_member`; perfil inativo gera `driver_inactive`; histórico recusa
+  `UPDATE`; escrita direta nas tabelas é negada.
+- **Sincronização manual**: cancelar ou marcar como entregue pelo painel atualiza as entregas ativas
+  na mesma operação.
+
+### Advisors de segurança
+
+Executado `supabase db advisors --linked --type security`. Resultado: 12 avisos, nenhum erro nem
+crítico.
+
+- 2 avisos de RPCs `SECURITY DEFINER` executáveis por `anon` (`create_order` e
+  `get_order_tracking`): públicas por desenho, com validação completa.
+- 9 avisos de RPCs autenticadas (`create_driver`, `update_driver`, `assign_delivery`,
+  `reassign_delivery`, `start_delivery`, `complete_delivery`, `cancel_delivery` e as duas RPCs de
+  pedido já existentes): acesso autenticado intencional, com autorização interna.
+- 1 aviso de **Leaked Password Protection desabilitada** (HIBP), configuração manual do Auth.
+
+### Correções durante a homologação
+
+- Revisão antes do push: `delivery_events` passou a bloquear apenas `UPDATE` (o bloqueio de `DELETE`
+  impedia a limpeza de fixtures); `assign_delivery` passou a aceitar pedidos já em
+  `out_for_delivery`; a política de leitura do entregador passou a filtrar o status da entrega para
+  revogar o acesso em reatribuição/cancelamento.
+- Integração: variáveis de RPC renomeadas para não colidir com usuários dos fixtures; teste de
+  desativação passou a resolver as entregas ativas do entregador antes; cancelamento manual passou a
+  partir de `accepted`, respeitando a máquina de estados da Etapa 3.
+- E2E: o token de acompanhamento passou a ser SHA-256 de um UUID (64 hex), compatível com o contrato
+  da aplicação.
+- Prettier aplicado aos arquivos novos/alterados; typecheck, lint e build reexecutados.
+
+### Achados revisados e pendências não bloqueantes
+
+**Bloqueiam lançamento comercial, não a homologação:**
+
+- Sem GPS, mapa, rota ou rastreamento em tempo real.
+- Sem aplicativo nativo, PWA/offline, push ou notificação ao entregador.
+- Atribuição manual, sem despacho automático.
+- Sem comprovante com foto/assinatura; confirmação por clique com diálogo.
+- Sem repasse financeiro, comissão ou limite de entregas simultâneas por entregador.
+- Cadastro exige conta existente; não há convite por e-mail.
+- HIBP continua pendente de habilitação no dashboard.
+
+### Critérios de aceite da Etapa 4
+
+- [x] As três migrações aplicadas no projeto de homologação, sem `reset` e sem alterar histórico.
+- [x] Atribuição real, acesso do entregador e início/fim de entrega validados na UI e no banco.
+- [x] Estados do pedido e da entrega consistentes, inclusive no fluxo manual da loja.
+- [x] Acompanhamento do cliente reflete a entrega sem expor dados do entregador.
+- [x] Isolamento entre lojas e revogação de acesso após reatribuição validados.
+- [x] Integração e E2E essenciais aprovados; suítes anteriores preservadas.
+- [x] `supabase db lint` e advisors de segurança executados; achados revisados.
+
+### Reprodução da Etapa 4
+
+```powershell
+npm run typecheck
+npm run lint
+npm run format:check
+npm test
+npm run test:e2e
+npm run build
+npx supabase db lint --linked
+npx supabase db advisors --linked --type security
+```
+
+Nunca aponte `SUPABASE_TEST_*` para produção: a suíte cria e remove usuários, lojas, cardápio,
+pedidos e entregadores. As credenciais ficam apenas em `.env.local`.

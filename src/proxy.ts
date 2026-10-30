@@ -37,7 +37,10 @@ export async function proxy(request: NextRequest) {
   const { response, user } = await refreshSession(request);
   const { pathname, search } = request.nextUrl;
 
-  const isProtectedRoute = pathname.startsWith("/dashboard") || pathname.startsWith("/admin");
+  const isProtectedRoute =
+    pathname.startsWith("/dashboard") ||
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/entregador");
 
   if (isProtectedRoute && !user) {
     return redirectWithSession(request, "/login", response, { next: `${pathname}${search}` });

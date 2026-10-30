@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { DELIVERY_STATUS_LABELS } from "@/modules/deliveries/constants";
 import {
   FULFILLMENT_LABELS,
   ORDER_STATUS_LABELS,
@@ -267,6 +268,48 @@ export function OrderTracking({
           </p>
         </section>
       )}
+
+      {!canceled && order.fulfillmentType === "delivery" && order.delivery ? (
+        <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-zinc-900">Entrega</h2>
+            <Badge variant={order.delivery.status === "picked_up" ? "brand" : "warning"}>
+              {DELIVERY_STATUS_LABELS[order.delivery.status]}
+            </Badge>
+          </div>
+
+          <p className="mt-2 text-sm text-zinc-600">
+            {order.delivery.status === "assigned"
+              ? "Um entregador foi designado e vai coletar o pedido na loja."
+              : order.delivery.status === "picked_up"
+                ? "O pedido foi coletado e está a caminho do seu endereço."
+                : order.delivery.status === "delivered"
+                  ? "Entrega concluída no endereço informado."
+                  : "A atribuição anterior foi cancelada. A loja vai designar outro entregador."}
+          </p>
+
+          <dl className="mt-3 space-y-1 border-t border-zinc-100 pt-3 text-xs text-zinc-500">
+            {order.delivery.assignedAt ? (
+              <div className="flex justify-between gap-2">
+                <dt>Designado</dt>
+                <dd>{formatDateTime(order.delivery.assignedAt)}</dd>
+              </div>
+            ) : null}
+            {order.delivery.pickedUpAt ? (
+              <div className="flex justify-between gap-2">
+                <dt>Coletado</dt>
+                <dd>{formatDateTime(order.delivery.pickedUpAt)}</dd>
+              </div>
+            ) : null}
+            {order.delivery.deliveredAt ? (
+              <div className="flex justify-between gap-2">
+                <dt>Entregue</dt>
+                <dd>{formatDateTime(order.delivery.deliveredAt)}</dd>
+              </div>
+            ) : null}
+          </dl>
+        </section>
+      ) : null}
 
       {refreshError ? (
         <Alert variant="warning" title="Atualização indisponível">

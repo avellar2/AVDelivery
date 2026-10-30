@@ -45,14 +45,40 @@ describe("navegação do cardápio", () => {
     expect(orders).toMatchObject({ href: null, available: false, locked: true });
   });
 
-  it("mantém módulos futuros como em breve", () => {
-    const items = getDashboardNavItems("owner");
+  it("libera entregadores para proprietário e gerente", () => {
+    for (const role of ["owner", "manager"] as const) {
+      const deliveries = getDashboardNavItems(role).find((item) => item.key === "deliveries");
 
-    for (const key of ["deliveries", "staff"] as const) {
-      const item = items.find((entry) => entry.key === key);
-      expect(item).toMatchObject({ href: null, available: false });
-      expect(item?.locked).toBeUndefined();
+      expect(deliveries).toMatchObject({
+        href: "/dashboard/entregadores",
+        available: true,
+        locked: false,
+      });
     }
+  });
+
+  it("leva o entregador para a área de entregas", () => {
+    const deliveries = getDashboardNavItems("driver").find((item) => item.key === "deliveries");
+
+    expect(deliveries).toMatchObject({
+      label: "Minhas entregas",
+      href: "/entregador",
+      available: true,
+      locked: false,
+    });
+  });
+
+  it("bloqueia entregas para funcionário", () => {
+    const deliveries = getDashboardNavItems("employee").find((item) => item.key === "deliveries");
+
+    expect(deliveries).toMatchObject({ href: null, available: false, locked: true });
+  });
+
+  it("mantém funcionários como módulo futuro", () => {
+    const staff = getDashboardNavItems("owner").find((item) => item.key === "staff");
+
+    expect(staff).toMatchObject({ href: null, available: false });
+    expect(staff?.locked).toBeUndefined();
   });
 
   it("bloqueia o cardápio sem loja ativa", () => {

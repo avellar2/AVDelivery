@@ -8,6 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { cn, formatCurrency, formatDateTime } from "@/lib/utils";
+import { DELIVERY_STATUS_LABELS } from "@/modules/deliveries/constants";
+import {
+  assignDeliveryAction,
+  cancelDeliveryAction,
+  reassignDeliveryAction,
+  refreshDriversAction,
+} from "@/modules/deliveries/actions";
+import type { DriverProfileSummary } from "@/modules/deliveries/types";
 import {
   FULFILLMENT_LABELS,
   ORDER_STATUS_LABELS,
@@ -98,6 +106,163 @@ function StatusBadge({ status }: { status: OrderStatus }) {
   return <Badge variant={STATUS_VARIANTS[status]}>{ORDER_STATUS_SHORT_LABELS[status]}</Badge>;
 }
 
+function DeliverySection({
+  order,
+  detail,
+  drivers,
+  canManageDeliveries,
+  pending,
+  onAssign,
+  onReassign,
+  onCancelDelivery,
+}: {
+  order: OrderSummary;
+  detail: OrderDetail | null;
+  drivers: DriverProfileSummary[];
+  canManageDeliveries: boolean;
+  pending: boolean;
+  onAssign: (driverProfileId: string) => void;
+  onReassign: (deliveryId: string, driverProfileId: string, reason: string) => void;
+  onCancelDelivery: (deliveryId: string, reason: string) => void;
+}) {
+  const [driverId, setDriverId] = useState("");
+  const [reason, setReason] = useState("");
+  const active = order.activeDelivery;
+  const history = detail?.deliveries ?? [];
+  const availableDrivers = drivers.filter((driver) => driver.active);
+  const assignable =
+    order.fulfillmentType === "delivery" &&
+    order.status !== "canceled" &&
+    order.status !== "delivered";
+
+  if (order.fulfillmentType !== "delivery") {
+    return (
+      <section className="rounded-lg border border-zinc-200 p-3">
+        <h3 className="text-sm font-semibold text-zinc-900">Entrega</h3>
+        <p className="mt-1 text-sm text-zinc-500">
+          Pedido para retirada no local. Não há entregador a atribuir.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-lg border border-zinc-200 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-zinc-900">Entrega</h3>
+        {active ? (
+          <Badge variant={active.status === "picked_up" ? "brand" : "warning"}>
+            {DELIVERY_STATUS_LABELS[active.status]}
+          </Badge>
+        ) : (
+          <Badge variant="muted">Sem entregador</Badge>
+        )}
+      </div>
+
+      {active ? (
+        <div className="mt-2 space-y-1 text-sm text-zinc-600">
+          <p className="font-medium text-zinc-900">{active.driverName}</p>
+          <p className="text-xs">
+            Atribuído em {formatDateTime(active.assignedAt)}
+            {active.pickedUpAt ? ` · Coletado em ${formatDateTime(active.pickedUpAt)}` : ""}
+          </p>
+        </div>
+      ) : (
+        <p className="mt-1 text-sm text-zinc-500">
+          {assignable
+            ? "Selecione um entregador ativo para este pedido."
+            : "Este pedido não aceita nova atribuição no estado atual."}
+        </p>
+      )}
+
+      {canManageDeliveries && assignable ? (
+        <div className="mt-3 space-y-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Select
+              aria-label="Escolher entregador"
+              value={driverId}
+              onChange={(event) => setDriverId(event.target.value)}
+              className="sm:max-w-64"
+            >
+              <option value="">Selecione um entregador</option>
+              {availableDrivers.map((driver) => (
+                <option key={driver.id} value={driver.id}>
+                  {driver.displayName}
+                  {driver.activeDeliveries > 0 ? ` (${driver.activeDeliveries} em rota)` : ""}
+                </option>
+              ))}
+            </Select>
+            <Button
+              type="button"
+              disabled={pending || !driverId || (active !== null && !reason.trim())}
+              onClick={() => {
+                if (active) {
+                  onReassign(active.id, driverId, reason.trim());
+                  setReason("");
+                } else {
+                  onAssign(driverId);
+                }
+                setDriverId("");
+              }}
+            >
+              {active ? "Reatribuir" : "Atribuir entregador"}
+            </Button>
+          </div>
+
+          {active ? (
+            <input
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="Motivo da reatribuição (obrigatório)"
+              aria-label="Motivo da reatribuição"
+              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
+            />
+          ) : null}
+
+          {availableDrivers.length === 0 ? (
+            <p className="text-xs text-zinc-500">
+              Nenhum entregador ativo. Cadastre em{" "}
+              <a className="font-medium text-orange-700" href="/dashboard/entregadores">
+                Entregadores
+              </a>
+              .
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {canManageDeliveries && active && active.status === "assigned" ? (
+        <Button
+          type="button"
+          variant="danger"
+          className="mt-2"
+          disabled={pending}
+          onClick={() => onCancelDelivery(active.id, reason.trim())}
+        >
+          Cancelar atribuição
+        </Button>
+      ) : null}
+
+      {history.length > 0 ? (
+        <div className="mt-3 border-t border-zinc-100 pt-2">
+          <h4 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
+            Histórico de atribuições
+          </h4>
+          <ul className="mt-1.5 space-y-1 text-xs text-zinc-500">
+            {history.map((delivery) => (
+              <li key={delivery.id}>
+                {formatDateTime(delivery.assignedAt)} · {delivery.driverName} ·{" "}
+                {DELIVERY_STATUS_LABELS[delivery.status]}
+                {delivery.cancelReason ? ` — ${delivery.cancelReason}` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function paymentActions(
   status: OrderPaymentStatus,
 ): { value: OrderPaymentStatus; label: string }[] {
@@ -121,8 +286,13 @@ function OrderDetailPanel({
   pending,
   canCancel,
   canManagePayments,
+  canManageDeliveries,
+  drivers,
   onStatus,
   onPayment,
+  onAssign,
+  onReassign,
+  onCancelDelivery,
 }: {
   order: OrderSummary;
   detail: OrderDetail | null;
@@ -130,8 +300,13 @@ function OrderDetailPanel({
   pending: boolean;
   canCancel: boolean;
   canManagePayments: boolean;
+  canManageDeliveries: boolean;
+  drivers: DriverProfileSummary[];
   onStatus: (status: OrderStatus) => void;
   onPayment: (status: OrderPaymentStatus) => void;
+  onAssign: (driverProfileId: string) => void;
+  onReassign: (deliveryId: string, driverProfileId: string, reason: string) => void;
+  onCancelDelivery: (deliveryId: string, reason: string) => void;
 }) {
   const nextStatuses = allowedNextStatuses(order.status, order.fulfillmentType).filter(
     (status) => status !== "canceled" || canCancel,
@@ -194,6 +369,17 @@ function OrderDetailPanel({
           ) : null}
         </div>
       </section>
+
+      <DeliverySection
+        order={order}
+        detail={detail}
+        drivers={drivers}
+        canManageDeliveries={canManageDeliveries}
+        pending={pending}
+        onAssign={onAssign}
+        onReassign={onReassign}
+        onCancelDelivery={onCancelDelivery}
+      />
 
       <section>
         <h3 className="text-sm font-semibold text-zinc-900">Itens</h3>
@@ -342,15 +528,20 @@ function OrderDetailPanel({
 export function OrdersBoard({
   storeName,
   initialOrders,
+  initialDrivers,
   canCancel,
   canManagePayments,
+  canManageDeliveries,
 }: {
   storeName: string;
   initialOrders: OrderSummary[];
+  initialDrivers: DriverProfileSummary[];
   canCancel: boolean;
   canManagePayments: boolean;
+  canManageDeliveries: boolean;
 }) {
   const [orders, setOrders] = useState<OrderSummary[]>(initialOrders);
+  const [drivers, setDrivers] = useState<DriverProfileSummary[]>(initialDrivers);
   const [filter, setFilter] = useState<OrderFilter>("active");
   const [search, setSearch] = useState("");
   const [requestedId, setRequestedId] = useState<string | null>(null);
@@ -423,6 +614,22 @@ export function OrdersBoard({
       }
     }
   }, []);
+
+  const reloadDrivers = useCallback(async () => {
+    if (!canManageDeliveries) {
+      return;
+    }
+
+    try {
+      const result = await refreshDriversAction();
+
+      if (result.ok) {
+        setDrivers(result.drivers);
+      }
+    } catch {
+      // A lista de entregadores é secundária; a recarga da página reconcilia os dados.
+    }
+  }, [canManageDeliveries]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -524,6 +731,78 @@ export function OrdersBoard({
 
       setActionMessage(result.message ?? "Pagamento atualizado.");
       await refresh(true);
+    });
+  }
+
+  function handleAssign(driverProfileId: string) {
+    if (!selectedOrder) {
+      return;
+    }
+
+    setActionError(null);
+    setActionMessage(null);
+
+    startTransition(async () => {
+      const result = await assignDeliveryAction(selectedOrder.id, driverProfileId);
+
+      if (result.status === "error") {
+        setActionError(result.message ?? "Não foi possível atribuir o entregador.");
+        return;
+      }
+
+      setActionMessage(result.message ?? "Entregador atribuído.");
+      await refresh(true);
+      await reloadDrivers();
+    });
+  }
+
+  function handleReassign(deliveryId: string, driverProfileId: string, reason: string) {
+    if (reason.trim().length < 3) {
+      setActionMessage(null);
+      setActionError("Informe o motivo da reatribuição (mínimo de 3 caracteres).");
+      return;
+    }
+
+    setActionError(null);
+    setActionMessage(null);
+
+    startTransition(async () => {
+      const result = await reassignDeliveryAction(deliveryId, driverProfileId, reason.trim());
+
+      if (result.status === "error") {
+        setActionError(result.message ?? "Não foi possível reatribuir a entrega.");
+        return;
+      }
+
+      setActionMessage(result.message ?? "Entrega reatribuída.");
+      await refresh(true);
+      await reloadDrivers();
+    });
+  }
+
+  function handleCancelDelivery(deliveryId: string, reason: string) {
+    if (
+      !window.confirm(
+        "Cancelar a atribuição deste pedido? O entregador atual perde o acesso a esta entrega.",
+      )
+    ) {
+      return;
+    }
+
+    setActionError(null);
+    setActionMessage(null);
+
+    startTransition(async () => {
+      const result = await cancelDeliveryAction(deliveryId, reason);
+
+      if (result.status === "error") {
+        setActionError(result.message ?? "Não foi possível cancelar a atribuição.");
+        return;
+      }
+
+      setActionMessage(result.message ?? "Atribuição cancelada.");
+      await refresh(true);
+      await reloadDrivers();
     });
   }
 
@@ -680,8 +959,13 @@ export function OrdersBoard({
               pending={pending}
               canCancel={canCancel}
               canManagePayments={canManagePayments}
+              canManageDeliveries={canManageDeliveries}
+              drivers={drivers}
               onStatus={handleStatus}
               onPayment={handlePayment}
+              onAssign={handleAssign}
+              onReassign={handleReassign}
+              onCancelDelivery={handleCancelDelivery}
             />
           ) : (
             <div className="grid h-full min-h-48 place-items-center text-center">
