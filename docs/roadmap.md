@@ -65,12 +65,12 @@ Critério de pronto: **atendido** — um gestor cadastrou categoria, produto, im
 associação, e o cardápio apareceu na página pública; isolamento entre lojas e uploads foram
 validados em Supabase real.
 
-## Etapa 3 — Carrinho, checkout e pedidos (implementada; homologação pendente)
+## Etapa 3 — Carrinho, checkout e pedidos (homologada em 2026-10-30)
 
-> **Estado:** código, migrações e testes implementados; validação local concluída (typecheck, lint,
-> 104 testes Vitest e build). A homologação em Supabase real — migrações aplicadas, integração e E2E —
-> **não** foi executada por falta de credenciais do projeto de testes. Ver
-> [orders.md](orders.md) e [homologation.md](homologation.md).
+> **Estado:** implementada e homologada em Supabase real: 9 migrações aplicadas sem `reset`, 149
+> testes Vitest aprovados (45 de integração) e 13 E2E aprovados, incluindo entrega e retirada/Pix.
+> Resultados e pendências não bloqueantes em [homologation.md](homologation.md) e
+> [orders.md](orders.md).
 
 Objetivo: receber e acompanhar pedidos sem pagamento online obrigatório e sem login do cliente.
 
@@ -102,9 +102,9 @@ Entregue:
 - [x] Link `wa.me` após o pedido existir, sem envio automático nem API paga.
 - [x] Testes unitários, de integração (quando há Supabase de teste) e E2E do fluxo completo.
 
-Critério de pronto: pedido criado na página pública aparece no painel da loja correta, e somente
-nela, com criação transacional e idempotente. **Critério ainda não homologado** porque a suíte
-integrada e o E2E não foram executados contra um Supabase real nesta máquina.
+Critério de pronto: **atendido** — pedido criado na página pública apareceu no painel da loja
+correta, e somente nela, com criação transacional, idempotente e concorrência validadas contra o
+Supabase real.
 
 ## Etapa 4 — Entregas
 

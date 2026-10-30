@@ -2,12 +2,11 @@
 
 ## Status
 
-**Etapas 1 e 2 homologadas em 2026-10-29**, com um item de endurecimento não bloqueante pendente
-(proteção de senhas vazadas, configuração manual no painel).
+**Etapas 1 e 2 homologadas em 2026-10-29; Etapa 3 homologada em 2026-10-30**, com um item de
+endurecimento não bloqueante pendente (proteção de senhas vazadas, configuração manual no painel).
 
-A Etapa 3 está **implementada e validada localmente**, mas **não homologada**: as migrações de
-pedidos não foram aplicadas ao projeto de testes e as suítes de integração/E2E de pedidos não foram
-executadas por falta de credenciais do Supabase nesta máquina. Ver a seção final.
+A Etapa 3 foi validada contra o projeto Supabase real de homologação, com migrações aplicadas,
+integração, E2E e revisão visual em desktop e mobile. Detalhes na seção final.
 
 A Etapa 1 está detalhada abaixo; a homologação da Etapa 2 está na seção seguinte.
 
@@ -149,11 +148,13 @@ habilitado no dashboard (Authentication > Password Security). Não bloqueia a ho
 ## Dados de homologação preservados no projeto de testes
 
 - 2 lojas ativas: `burger-homologacao`, `pizza-homologacao`;
-- 2 vínculos `owner` (um por loja);
-- 1 superadministrador;
-- 3 perfis.
+- 4 vínculos `owner` (2 originais + 2 contas dedicadas de teste);
+- 2 superadministradores;
+- 6 perfis.
 
-Nenhum dado de produção foi acessado, alterado ou apagado. Nenhum `reset` remoto foi executado.
+As contas de teste são exclusivas do projeto de homologação e suas senhas ficam apenas no
+`.env.local` (ignorado pelo Git). Nenhum dado de produção foi acessado, alterado ou apagado.
+Nenhum `reset` remoto foi executado.
 
 ## Reprodução
 
@@ -243,80 +244,136 @@ o bucket sem objetos órfãos.
 - Produtos são arquivados, não excluídos fisicamente.
 - HIBP, entrega real de e-mail e rotação após 1h continuam como pendências da Fundação.
 
-## Etapa 3 — Pedidos (implementação local; homologação pendente)
+## Homologação da Etapa 3 — Pedidos
 
-**NÃO HOMOLOGADA.** O código, as três migrações e os testes foram concluídos, mas a validação
-contra Supabase real ainda não ocorreu.
+**HOMOLOGADA em 2026-10-30** no projeto Supabase exclusivo de testes
+(`jtryfpaxocdiqrehptlz`). Nenhum banco de produção foi acessado, nenhum `reset` remoto foi
+executado e nenhuma migração já aplicada foi editada ou reaplicada.
 
-### O que foi validado localmente
+### Migrações aplicadas
 
-| Verificação            | Resultado                                                        |
-| ---------------------- | ---------------------------------------------------------------- |
-| `npm run typecheck`    | OK                                                               |
-| `npm run lint`         | OK, sem avisos                                                   |
-| `npm test`             | **104 aprovados / 45 ignorados** (14 arquivos; 3 ignorados)      |
-| `npm run build`        | OK, inclui `/dashboard/pedidos` e `/loja/[slug]/pedido/[numero]` |
-| `npm run format:check` | OK                                                               |
+- `20261029140000_orders_schema.sql`
+- `20261029140100_orders_security.sql`
+- `20261029140200_orders_functions.sql`
 
-Os 45 testes ignorados por `npm test` são todos de Vitest e exigem Supabase de teste: 27 de
-Fundação/cardápio e 18 de pedidos (`tests/integration/orders.test.ts`). O E2E roda em suíte separada
-(`npm run test:e2e`) e também não é executado sem `SUPABASE_TEST_*`. Nenhum deles conta como
-aprovado.
+O `db push --dry-run` listou exatamente as três migrações pendentes. Foram aplicadas com
+`db push --linked`; o histórico remoto passou a ter **9 migrações**, todas verificadas. O schema
+passou no `db lint` sem erros.
 
-### Evidência do bloqueio de infraestrutura (2026-10-29)
+### Ambiente e credenciais
 
-| Verificação                              | Resultado                                                |
-| ---------------------------------------- | -------------------------------------------------------- |
-| `.env.local`                             | ausente (apenas `.env.example`)                          |
-| `SUPABASE_TEST_URL` e chaves de teste    | ausentes                                                 |
-| `SUPABASE_ACCESS_TOKEN`                  | ausente                                                  |
-| `npx supabase projects list`             | `AccessTokenRequiredError`                               |
-| `npx supabase status` → `linked_project` | `null`                                                   |
-| Docker local                             | indisponível (`dockerDesktopLinuxEngine` não encontrado) |
+O `.env.local` foi criado a partir de `.env.example` e preenchido com as chaves do projeto de
+homologação obtidas pela CLI já autenticada, sem exibir valores em terminal, logs ou documentação.
+Foram usadas as chaves no formato legado esperado pela aplicação (`anon` e `service_role`); nenhuma
+migração de formato de chave foi feita. O arquivo é ignorado pelo Git e contém também
+`SUPABASE_TEST_*`, `NEXT_PUBLIC_SITE_URL` e credenciais geradas exclusivamente para os testes
+(`DEMO_*`, `SUPERADMIN_*`).
 
-Nenhuma migração foi aplicada, nenhum teste de integração/E2E foi executado e nenhum advisor ou
-`db lint` foi rodado. Nada nesta seção deve ser lido como resultado remoto.
+### Resultados reais
 
-### Correções aplicadas na revisão de homologação
+| Verificação            | Resultado                                                             |
+| ---------------------- | --------------------------------------------------------------------- |
+| `npm run typecheck`    | OK                                                                    |
+| `npm run lint`         | OK, sem avisos                                                        |
+| `npm run format:check` | OK                                                                    |
+| `npm test`             | **149/149** (17 arquivos), com integração Supabase habilitada         |
+| `npm run test:e2e`     | **13/13**                                                             |
+| `npm run build`        | OK, inclui `/dashboard/pedidos` e `/loja/[slug]/pedido/[numero]`      |
+| `supabase db lint`     | nenhum erro de schema                                                 |
+| Security Advisors      | executado; 7 avisos revisados (6 intencionais + HIBP), nenhum crítico |
 
-Nenhuma foi validada contra Supabase real; entram como pendentes de verificação na FASE de
-integração.
+Integração: **45/45** testes com Supabase real — 27 de Fundação/cardápio e 18 de pedidos
+(`tests/integration/orders.test.ts`). Os 18 cobrem criação transacional, idempotência com mesma
+chave, conflito de payload, concorrência, loja pausada/inativa, formas de pagamento desabilitadas,
+preços adulterados, adicionais acima de 50, isolamento entre lojas, PII, token de acompanhamento,
+transições de status e pagamento.
 
-- **Idempotência após pausa/desativação:** a RPC `create_order` agora carrega a loja por slug, toma
-  o lock da chave e devolve o pedido original antes de exigir `active`/`accepting_orders`. Uma
-  retentativa idêntica continua retornando o mesmo pedido mesmo que a loja tenha sido pausada ou
-  desativada; pedidos novos continuam bloqueados.
-- **Limite de adicionais no banco:** `create_order` recusa mais de 50 adicionais por item, alinhado
-  ao limite da aplicação.
-- **Integridade do cadastro:** checkout anônimo não sobrescreve mais `customers.name` de um telefone
-  já cadastrado; o pedido mantém seu próprio snapshot de nome.
-- **Hash determinístico:** a quantidade passou a compor a ordenação canônica dos itens.
-- **Cobertura nova (Vitest):** retentativa após pausa e desativação, limite de 50 adicionais,
-  preservação do nome do cadastro e numeração concorrente sem repetição.
-- **Cobertura nova (E2E):** segundo pedido com retirada e Pix manual, incluindo chave exibida,
-  endereço nulo no banco e acompanhamento.
-- **Formatação:** `endOfLine: "auto"` no Prettier evita reescrever 98 arquivos por CRLF; tabelas de
-  três documentos foram alinhadas sem mudança de conteúdo.
+E2E de pedidos (`tests/e2e/orders.spec.ts`): cliente mobile cria pedido de entrega com dinheiro,
+acompanha cada transição até entregue, a loja marca como pago, a Loja B não vê o pedido; em seguida
+o mesmo cliente cria um pedido de **retirada com Pix manual**, com chave exibida, endereço nulo no
+banco, total sem taxa e acompanhamento público. O token de acompanhamento é validado no formato
+`#t=<64 hex>` e o banco guarda somente o hash.
+
+E2E geral (`npm run test:e2e`): 13/13 — 6 de autenticação/proteção de rotas, 5 de homologação
+autenticada (owner A, owner B, superadministrador, páginas públicas, recuperação de senha), 1 de
+cardápio/Storage e 1 de pedidos.
+
+### Revisão visual em navegador
+
+Com Chromium real (Playwright), foram capturadas telas em **desktop 1440×900** e **mobile 390×844**
+do cardápio, personalização, carrinho, checkout, revisão, confirmação, acompanhamento e painel. O
+cardápio temporário usado na revisão foi removido ao final, as configurações de Pix da loja demo
+foram restauradas e a verificação final encontrou **0 produtos e 0 pedidos** nas lojas demo.
+
+- Sem overflow horizontal nas duas larguras (`scrollWidth - innerWidth <= 1`).
+- Checkout mobile com retirada e dinheiro exibiu os campos corretos e ocultou o endereço.
+- Revisão desktop exibiu endereço, Pix manual e chave Pix.
+- Painel desktop e mobile exibiu a fila, os dados do cliente e as ações de status/pagamento.
+- O texto do cartão de retirada, que dizia "Sem taxa de entrega", passou a "Retire no balcão da
+  loja" para não sugerir cobrança de entrega.
+
+As capturas ficaram em `test-results/visual/` (ignorado pelo Git) e não fazem parte do commit.
+
+### Segurança e concorrência verificadas no banco real
+
+- **RLS habilitada** em `orders`, `order_items`, `order_item_options`, `order_events`, `customers`,
+  `stores`, `store_memberships`, `products`, `product_options`, `option_groups`,
+  `product_option_groups` e `categories`.
+- Políticas de pedidos: somente `SELECT` para `authenticated`, condicionado a
+  `private.has_store_role(...)` ou `private.is_platform_admin()`. **Nenhuma política para `anon`**;
+  escrita ocorre apenas pelas RPCs.
+- **Grants das RPCs**: `create_order` e `get_order_tracking` para `anon`, `authenticated` e
+  `service_role` (checkout e acompanhamento públicos); `update_order_status` e
+  `update_order_payment_status` somente para `authenticated` e `service_role`.
+- As quatro funções são `SECURITY DEFINER` com `search_path = ''`, owner `postgres`, e verificam
+  autorização internamente (`auth.uid()`, vínculo com a loja, admin da plataforma, transições
+  válidas e lock `FOR UPDATE`).
+- **Token de acompanhamento**: 32 bytes aleatórios gerados no cliente, SHA-256 persistido; a coluna
+  exposta é apenas `tracking_token_hash`, com unicidade por loja. A RPC exige hash de 64 hex e
+  devolve `null` para qualquer combinação inválida.
+- **Preços**: o banco recalcula subtotal, adicionais, taxa e total a partir de produtos/opções
+  atuais; o payload do cliente não define valores.
+- **Idempotência**: lock transacional por `(store_id, idempotency_key)`, índice único
+  `orders_store_idempotency_key` e comparação de hash canônico; retentativa idêntica devolve o mesmo
+  pedido mesmo após pausa/desativação da loja.
+- **Numeração concorrente**: índice único `(store_id, order_number)` e teste com pedidos simultâneos
+  sem repetição.
+
+### Correções durante a homologação
+
+- Fixtures de integração e E2E passaram a declarar todas as colunas `NOT NULL` do checkout: o
+  PostgREST envia a união das colunas no insert em lote e não aplica defaults por linha.
+- E2E: locators passaram a usar botões por número do pedido e a filtrar elementos ocultos de
+  `<select>`/detalhe; ao entregar, o pedido sai do filtro "Em andamento", então o teste muda para
+  "Todos os pedidos" antes de validar o estado final e o pagamento.
+- E2E: o painel mostra "Retirada no local"; a asserção foi alinhada ao texto real.
+- Checkout: o cartão de retirada deixou de exibir "Sem taxa de entrega".
 
 ### Critérios de aceite da Etapa 3
 
-- [ ] As três migrações aplicadas no projeto de homologação, sem `reset` e sem alterar histórico
-      anterior.
-- [ ] `create_order` transacional e idempotente validada contra o banco real, incluindo repetição,
+- [x] As três migrações aplicadas no projeto de homologação, sem `reset` e sem alterar histórico.
+- [x] `create_order` transacional e idempotente validada contra o banco real, incluindo repetição,
       conflito de payload e concorrência.
-- [ ] Isolamento entre lojas e proteção de PII validados contra o banco real.
-- [ ] Token de acompanhamento validado contra o banco real.
-- [ ] E2E mobile completo (entrega e retirada/Pix) aprovado.
-- [ ] `supabase db lint` e advisors de segurança sem achados críticos.
-- [ ] Pedido real criado pela página pública, visível à loja correta, operado por usuário
+- [x] Isolamento entre lojas e proteção de PII validados contra o banco real.
+- [x] Token de acompanhamento validado contra o banco real.
+- [x] E2E mobile completo (entrega e retirada/Pix) aprovado.
+- [x] `supabase db lint` e advisors de segurança executados; achados revisados.
+- [x] Pedido real criado pela página pública, visível à loja correta, operado por usuário
       autorizado e acompanhado pelo consumidor.
 
-### Limitações e classificação
+### Achados dos Security Advisors
 
-**Bloqueiam a homologação** (tudo acima): ausência de credenciais/projeto vinculado e, portanto,
-migrações não aplicadas, integração/E2E não executados, sem lint de banco e advisors.
+Executado `supabase db advisors --linked --type security`. Resultado: 7 avisos, nenhum erro.
 
-**Não bloqueiam a homologação, mas bloqueiam lançamento comercial:**
+- 6 avisos de funções `SECURITY DEFINER` executáveis por `anon`/`authenticated`: são as RPCs
+  públicas de checkout/acompanhamento e as RPCs autenticadas de operação da loja. O acesso é
+  intencional e cada função valida autorização internamente; grants e políticas foram conferidos no
+  banco.
+- 1 aviso de **Leaked Password Protection desabilitada** (HIBP), configuração manual do Auth.
+
+### Pendências não bloqueantes da Etapa 3
+
+**Bloqueiam lançamento comercial, não a homologação:**
 
 - Sem gateway de pagamento nem conciliação automática; Pix é manual.
 - Atualização por polling (painel 15 s, acompanhamento 12 s), sem push.
@@ -324,30 +381,24 @@ migrações não aplicadas, integração/E2E não executados, sem lint de banco 
 - Lista do painel limitada a 200 pedidos, sem paginação.
 - Sem GPS, aplicativo de entregador, impressão térmica, cupom ou agendamento.
 - Sem notificação por e-mail/SMS/push.
+- HIBP/leaked password protection continua pendente de habilitação no dashboard.
+- Em `next dev` foi observado um aviso de hidratação em `/dashboard/produtos` envolvendo
+  `style={{ caretColor: "transparent" }}` injetado no ambiente de desenvolvimento. O build de
+  produção compilou sem erros; o aviso não se reproduziu em fluxo funcional e não bloqueia a
+  homologação.
 
-### O que falta para homologar
+### Reprodução da Etapa 3
 
-1. Definir `SUPABASE_TEST_URL`, `SUPABASE_TEST_ANON_KEY` e `SUPABASE_TEST_SERVICE_ROLE_KEY` de um
-   projeto exclusivo de testes.
-2. Aplicar, sem `reset`, as migrações:
-   - `20261029140000_orders_schema.sql`
-   - `20261029140100_orders_security.sql`
-   - `20261029140200_orders_functions.sql`
-3. Executar `npm test` com a integração habilitada e confirmar criação transacional, idempotência,
-   concorrência, isolamento entre lojas, preços adulterados, permissões e token de acompanhamento.
-4. Executar `npm run test:e2e` com o fluxo `tests/e2e/orders.spec.ts` (cliente mobile → painel →
-   acompanhamento → isolamento da Loja B).
-5. Rodar `supabase db lint` e os advisors de segurança no projeto de testes.
-6. Verificar manualmente o checkout nas duas lojas de homologação, desktop e mobile, incluindo
-   entrega e retirada com Pix manual.
+```powershell
+npm run typecheck
+npm run lint
+npm run format:check
+npm test
+npm run test:e2e
+npm run build
+npx supabase db lint --linked
+npx supabase db advisors --linked --type security
+```
 
-### Pontos de atenção antes de rodar em Supabase real
-
-- As migrações são novas e não alteram migrações já aplicadas; `db push --dry-run` deve listar
-  exatamente as três.
-- Os testes criam e removem seus próprios usuários, lojas, cardápio e pedidos. Nunca aponte
-  `SUPABASE_TEST_*` para produção.
-- O E2E de pedidos exige o app rodando na porta configurada pelo Playwright e as migrações
-  aplicadas.
-- A homologação só pode ser declarada com os resultados reais de integração e E2E, não com testes
-  ignorados.
+Nunca aponte `SUPABASE_TEST_*` para produção: a suíte cria e remove usuários, lojas, cardápio e
+pedidos. As credenciais ficam apenas em `.env.local`.

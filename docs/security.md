@@ -405,9 +405,10 @@ endereços nunca são logados.
 9. **Sem paginação no admin** — consulta limitada a 200 lojas.
 10. **Segurança do projeto Supabase** (acesso ao dashboard, chaves, backups) é parte da fronteira de
     confiança e deve ser protegida com MFA e rotação de chaves.
-11. **Homologação concluída em 2026-10-29** — 27 integrações com Auth/PostgREST/Storage, 90 testes
-    Vitest, 12 E2E, login/logout, recuperação, cardápio e uploads. Pendências não bloqueantes: HIBP,
-    entrega real de e-mail e rotação após expiração de 1h. Ver [homologation.md](homologation.md).
+11. **Homologação concluída em 2026-10-29 (Etapas 1 e 2) e 2026-10-30 (Etapa 3)** — 45 integrações
+    com Auth/PostgREST/Storage, 149 testes Vitest e 13 E2E, incluindo login/logout, recuperação,
+    cardápio/uploads e o fluxo completo de pedidos. Pendências não bloqueantes: HIBP, entrega real
+    de e-mail e rotação após expiração de 1h. Ver [homologation.md](homologation.md).
 12. **Bucket público** — imagens continuam acessíveis por URL mesmo após desativação; não usar para
     conteúdo privado.
 13. **Capacidade de grupos** — a consistência mínimo/máximo × opções é garantida nas ações do app e
@@ -422,8 +423,9 @@ endereços nunca são logados.
 17. **Checkout e acompanhamento são públicos** — as RPCs são executáveis com a chave anon; a proteção
     está na validação completa, no recálculo de preços, no token de alta entropia e nos rate limits,
     não em autenticação.
-18. **Etapa 3 não homologada em Supabase real** — migrações, integração e E2E de pedidos ainda não
-    foram executados no projeto de testes. Ver [homologation.md](homologation.md).
+18. **Etapa 3 homologada em 2026-10-30** — migrações aplicadas, 45 testes de integração e 13 E2E
+    executados no projeto de testes; grants e políticas das RPCs de pedidos conferidos no banco.
+    Ver [homologation.md](homologation.md).
 
 ## Checklist operacional
 

@@ -3,10 +3,10 @@
 Documento da Etapa 3: carrinho, checkout público, criação transacional, operação no painel e
 acompanhamento sem login.
 
-> **Estado:** implementação concluída e validada localmente (typecheck, lint, 104 testes
-> unitários/contratuais, build). A homologação com Supabase real — migrações aplicadas, integração e
-> E2E — ainda **não** foi executada por falta de credenciais do projeto de testes. Ver
-> [homologation.md](homologation.md).
+> **Estado:** implementação concluída e **homologada em 2026-10-30** contra o projeto Supabase
+> exclusivo de testes: 9 migrações aplicadas sem `reset`, 149 testes Vitest aprovados (45 de
+> integração real) e 13 E2E aprovados, incluindo entrega e retirada/Pix em mobile. Resultados,
+> correções e pendências não bloqueantes em [homologation.md](homologation.md).
 
 ## Princípios
 

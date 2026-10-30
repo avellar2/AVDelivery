@@ -3,8 +3,8 @@
 Plataforma SaaS multiempresa de delivery para hamburguerias, pizzarias, lanchonetes e restaurantes.
 Comercialização por assinatura mensal por estabelecimento, sem comissão por pedido.
 
-**Status atual: Etapas 1 e 2 homologadas** em projeto Supabase exclusivo de testes (2026-10-29).
-**Etapa 3 implementada e validada localmente; homologação em Supabase real pendente.**
+**Status atual: Etapas 1, 2 e 3 homologadas** em projeto Supabase exclusivo de testes
+(2026-10-29 e 2026-10-30).
 
 A plataforma entrega autenticação, isolamento multiempresa por RLS, painel do estabelecimento,
 superadministrador, cardápio digital com categorias/produtos/adicionais e imagens, página pública
@@ -252,10 +252,10 @@ npm test                 # unitários + integração (integração é ignorada s
 npm run test:e2e         # requer: npx playwright install chromium
 ```
 
-Situação atual: **104 testes Vitest aprovados** (unitários e contratuais) e **45 ignorados** — os 27
-testes de integração da Fundação/cardápio e os 18 de pedidos, que exigem `SUPABASE_TEST_*`. Os 12 E2E
-das etapas anteriores foram aprovados na homologação; o E2E de pedidos ainda não foi executado
-contra Supabase real. O detalhamento está em [docs/homologation.md](docs/homologation.md).
+Situação atual: **149 testes Vitest aprovados** (17 arquivos), incluindo os 27 testes de integração
+da Fundação/cardápio e os 18 de pedidos, executados com `SUPABASE_TEST_*`. A suíte E2E tem **13/13**
+aprovados, incluindo o fluxo completo de pedidos (entrega e retirada/Pix) em mobile. O detalhamento
+está em [docs/homologation.md](docs/homologation.md).
 
 O Vitest e o Playwright carregam `.env.local` automaticamente. O E2E autenticado da Fundação
 (`tests/e2e/homologation.spec.ts`) é ignorado quando as credenciais `DEMO_*`/`SUPERADMIN_*` não estão
@@ -401,11 +401,11 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - Entrega real de e-mail de recuperação não verificada (fluxo validado via token); configurar
   SMTP para produção.
 - Rotação de token após a expiração de 1h não simulada; persistência de sessão em reload verificada.
-- **Etapa 3 ainda não homologada em Supabase real**: migrações, integração e E2E de pedidos estão
-  pendentes de execução com credenciais do projeto de testes.
+- **Etapa 3 homologada em 2026-10-30** no projeto de testes; os itens de lançamento comercial
+  (gateway de pagamento, push, rate limit distribuído, paginação, GPS/entregadores, impressão,
+  cupons, agendamento e notificações) continuam pendentes.
 
 ## Próxima etapa recomendada
 
-1. Homologar a Etapa 3: aplicar as três migrações no projeto de testes, executar integração e E2E e
-   validar o fluxo nas duas lojas de homologação.
-2. Depois, iniciar a Etapa 4 — Entregas, conforme [docs/roadmap.md](docs/roadmap.md).
+A Etapa 3 está homologada. A Etapa 4 — Entregas, conforme [docs/roadmap.md](docs/roadmap.md),
+permanece como próximo escopo e não foi iniciada.
