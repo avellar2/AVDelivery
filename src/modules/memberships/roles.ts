@@ -32,3 +32,15 @@ export function canManageMembers(role: StoreMemberRole): boolean {
 export function canToggleStoreActive(role: StoreMemberRole): boolean {
   return role === "owner";
 }
+
+export function canOperateOrders(role: StoreMemberRole): boolean {
+  return role === "owner" || role === "manager" || role === "employee";
+}
+
+export function canCancelOrders(role: StoreMemberRole): boolean {
+  return role === "owner" || role === "manager";
+}
+
+export function canManagePayments(role: StoreMemberRole): boolean {
+  return role === "owner" || role === "manager";
+}

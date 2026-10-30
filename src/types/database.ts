@@ -2,6 +2,15 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 
 export type StoreMemberRole = "owner" | "manager" | "employee" | "driver";
 
+export type OrderStatus =
+  "pending" | "accepted" | "preparing" | "ready" | "out_for_delivery" | "delivered" | "canceled";
+
+export type OrderFulfillmentType = "delivery" | "pickup";
+
+export type OrderPaymentMethod = "pix" | "cash" | "card_on_delivery";
+
+export type OrderPaymentStatus = "pending" | "paid" | "canceled";
+
 export type Database = {
   public: {
     Tables: {
@@ -33,6 +42,16 @@ export type Database = {
           phone: string | null;
           logo_url: string | null;
           active: boolean;
+          accepting_orders: boolean;
+          delivery_enabled: boolean;
+          pickup_enabled: boolean;
+          delivery_fee_cents: number;
+          min_order_cents: number;
+          payment_pix_enabled: boolean;
+          payment_cash_enabled: boolean;
+          payment_card_on_delivery_enabled: boolean;
+          pix_key: string | null;
+          pix_receiver_name: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -44,6 +63,16 @@ export type Database = {
           phone?: string | null;
           logo_url?: string | null;
           active?: boolean;
+          accepting_orders?: boolean;
+          delivery_enabled?: boolean;
+          pickup_enabled?: boolean;
+          delivery_fee_cents?: number;
+          min_order_cents?: number;
+          payment_pix_enabled?: boolean;
+          payment_cash_enabled?: boolean;
+          payment_card_on_delivery_enabled?: boolean;
+          pix_key?: string | null;
+          pix_receiver_name?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -53,6 +82,16 @@ export type Database = {
           phone?: string | null;
           logo_url?: string | null;
           active?: boolean;
+          accepting_orders?: boolean;
+          delivery_enabled?: boolean;
+          pickup_enabled?: boolean;
+          delivery_fee_cents?: number;
+          min_order_cents?: number;
+          payment_pix_enabled?: boolean;
+          payment_cash_enabled?: boolean;
+          payment_card_on_delivery_enabled?: boolean;
+          pix_key?: string | null;
+          pix_receiver_name?: string | null;
           updated_at?: string;
         };
         Relationships: [];
@@ -246,11 +285,203 @@ export type Database = {
         };
         Relationships: [];
       };
+      customers: {
+        Row: {
+          id: string;
+          store_id: string;
+          name: string;
+          phone: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          name: string;
+          phone: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          name?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      orders: {
+        Row: {
+          id: string;
+          store_id: string;
+          customer_id: string | null;
+          order_number: number;
+          customer_name: string;
+          customer_phone: string;
+          fulfillment_type: OrderFulfillmentType;
+          delivery_address_snapshot: Json | null;
+          payment_method: OrderPaymentMethod;
+          payment_status: OrderPaymentStatus;
+          status: OrderStatus;
+          subtotal_cents: number;
+          delivery_fee_cents: number;
+          total_cents: number;
+          notes: string | null;
+          idempotency_key: string;
+          request_hash: string;
+          tracking_token_hash: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          customer_id?: string | null;
+          order_number: number;
+          customer_name: string;
+          customer_phone: string;
+          fulfillment_type: OrderFulfillmentType;
+          delivery_address_snapshot?: Json | null;
+          payment_method: OrderPaymentMethod;
+          payment_status?: OrderPaymentStatus;
+          status?: OrderStatus;
+          subtotal_cents: number;
+          delivery_fee_cents?: number;
+          total_cents: number;
+          notes?: string | null;
+          idempotency_key: string;
+          request_hash: string;
+          tracking_token_hash: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          payment_status?: OrderPaymentStatus;
+          status?: OrderStatus;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      order_items: {
+        Row: {
+          id: string;
+          store_id: string;
+          order_id: string;
+          product_id: string | null;
+          product_name_snapshot: string;
+          unit_price_cents: number;
+          quantity: number;
+          total_cents: number;
+          notes: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          order_id: string;
+          product_id?: string | null;
+          product_name_snapshot: string;
+          unit_price_cents: number;
+          quantity: number;
+          total_cents: number;
+          notes?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          notes?: string | null;
+        };
+        Relationships: [];
+      };
+      order_item_options: {
+        Row: {
+          id: string;
+          store_id: string;
+          order_item_id: string;
+          option_id: string | null;
+          option_group_name_snapshot: string;
+          option_name_snapshot: string;
+          additional_price_cents: number;
+          quantity: number;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          order_item_id: string;
+          option_id?: string | null;
+          option_group_name_snapshot: string;
+          option_name_snapshot: string;
+          additional_price_cents?: number;
+          quantity?: number;
+        };
+        Update: {
+          quantity?: number;
+        };
+        Relationships: [];
+      };
+      order_events: {
+        Row: {
+          id: string;
+          store_id: string;
+          order_id: string;
+          previous_status: OrderStatus | null;
+          new_status: OrderStatus;
+          actor_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          order_id: string;
+          previous_status?: OrderStatus | null;
+          new_status: OrderStatus;
+          actor_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          actor_id?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
-    Functions: { [_ in never]: never };
+    Functions: {
+      create_order: {
+        Args: {
+          p_store_slug: string;
+          p_payload: Json;
+          p_idempotency_key: string;
+          p_request_hash: string;
+          p_tracking_token_hash: string;
+        };
+        Returns: Json;
+      };
+      get_order_tracking: {
+        Args: {
+          p_store_slug: string;
+          p_order_number: number;
+          p_tracking_token_hash: string;
+        };
+        Returns: Json;
+      };
+      update_order_status: {
+        Args: {
+          p_order_id: string;
+          p_new_status: OrderStatus;
+        };
+        Returns: Json;
+      };
+      update_order_payment_status: {
+        Args: {
+          p_order_id: string;
+          p_new_status: OrderPaymentStatus;
+        };
+        Returns: Json;
+      };
+    };
     Enums: {
       store_member_role: StoreMemberRole;
+      order_status: OrderStatus;
+      order_fulfillment_type: OrderFulfillmentType;
+      order_payment_method: OrderPaymentMethod;
+      order_payment_status: OrderPaymentStatus;
     };
     CompositeTypes: { [_ in never]: never };
   };
@@ -265,3 +496,8 @@ export type ProductRow = Database["public"]["Tables"]["products"]["Row"];
 export type OptionGroupRow = Database["public"]["Tables"]["option_groups"]["Row"];
 export type ProductOptionGroupRow = Database["public"]["Tables"]["product_option_groups"]["Row"];
 export type ProductOptionRow = Database["public"]["Tables"]["product_options"]["Row"];
+export type CustomerRow = Database["public"]["Tables"]["customers"]["Row"];
+export type OrderRow = Database["public"]["Tables"]["orders"]["Row"];
+export type OrderItemRow = Database["public"]["Tables"]["order_items"]["Row"];
+export type OrderItemOptionRow = Database["public"]["Tables"]["order_item_options"]["Row"];
+export type OrderEventRow = Database["public"]["Tables"]["order_events"]["Row"];

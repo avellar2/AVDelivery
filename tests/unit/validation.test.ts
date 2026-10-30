@@ -64,8 +64,22 @@ describe("resetPasswordSchema", () => {
 });
 
 describe("storeSettingsSchema", () => {
+  const checkoutSettings = {
+    acceptingOrders: true,
+    deliveryEnabled: true,
+    pickupEnabled: true,
+    deliveryFeeCents: "5,90",
+    minOrderCents: "20,00",
+    paymentPixEnabled: false,
+    paymentCashEnabled: true,
+    paymentCardOnDeliveryEnabled: false,
+    pixKey: "",
+    pixReceiverName: "",
+  };
+
   it("aceita dados válidos e converte campos vazios em null", () => {
     const result = storeSettingsSchema.safeParse({
+      ...checkoutSettings,
       name: "Burger do Bairro",
       description: "",
       phone: "(11) 90000-0000",
@@ -77,11 +91,26 @@ describe("storeSettingsSchema", () => {
       expect(result.data.description).toBeNull();
       expect(result.data.logoUrl).toBeNull();
       expect(result.data.phone).toBe("(11) 90000-0000");
+      expect(result.data.deliveryFeeCents).toBe(590);
+      expect(result.data.minOrderCents).toBe(2000);
     }
+  });
+
+  it("aceita logo https", () => {
+    const result = storeSettingsSchema.safeParse({
+      ...checkoutSettings,
+      name: "Loja Válida",
+      description: "",
+      phone: "",
+      logoUrl: "https://exemplo.com/logo.png",
+    });
+
+    expect(result.success).toBe(true);
   });
 
   it("rejeita nome curto", () => {
     const result = storeSettingsSchema.safeParse({
+      ...checkoutSettings,
       name: "A",
       description: "",
       phone: "",
@@ -93,6 +122,7 @@ describe("storeSettingsSchema", () => {
 
   it("rejeita telefone inválido", () => {
     const result = storeSettingsSchema.safeParse({
+      ...checkoutSettings,
       name: "Loja Válida",
       description: "",
       phone: "ligar depois",
@@ -104,6 +134,7 @@ describe("storeSettingsSchema", () => {
 
   it("rejeita logo com protocolo não permitido", () => {
     const result = storeSettingsSchema.safeParse({
+      ...checkoutSettings,
       name: "Loja Válida",
       description: "",
       phone: "",
@@ -111,17 +142,6 @@ describe("storeSettingsSchema", () => {
     });
 
     expect(result.success).toBe(false);
-  });
-
-  it("aceita logo https", () => {
-    const result = storeSettingsSchema.safeParse({
-      name: "Loja Válida",
-      description: "",
-      phone: "",
-      logoUrl: "https://exemplo.com/logo.png",
-    });
-
-    expect(result.success).toBe(true);
   });
 });
 

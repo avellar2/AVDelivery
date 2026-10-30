@@ -68,6 +68,16 @@ export async function updateStoreSettingsAction(
     description: String(formData.get("description") ?? ""),
     phone: String(formData.get("phone") ?? ""),
     logoUrl: String(formData.get("logoUrl") ?? ""),
+    acceptingOrders: formData.get("acceptingOrders") === "on",
+    deliveryEnabled: formData.get("deliveryEnabled") === "on",
+    pickupEnabled: formData.get("pickupEnabled") === "on",
+    deliveryFeeCents: String(formData.get("deliveryFeeCents") ?? "0"),
+    minOrderCents: String(formData.get("minOrderCents") ?? "0"),
+    paymentPixEnabled: formData.get("paymentPixEnabled") === "on",
+    paymentCashEnabled: formData.get("paymentCashEnabled") === "on",
+    paymentCardOnDeliveryEnabled: formData.get("paymentCardOnDeliveryEnabled") === "on",
+    pixKey: String(formData.get("pixKey") ?? ""),
+    pixReceiverName: String(formData.get("pixReceiverName") ?? ""),
   });
 
   if (!parsed.success) {
@@ -83,6 +93,16 @@ export async function updateStoreSettingsAction(
     description: parsed.data.description,
     phone: parsed.data.phone,
     logo_url: parsed.data.logoUrl,
+    accepting_orders: parsed.data.acceptingOrders,
+    delivery_enabled: parsed.data.deliveryEnabled,
+    pickup_enabled: parsed.data.pickupEnabled,
+    delivery_fee_cents: parsed.data.deliveryFeeCents,
+    min_order_cents: parsed.data.minOrderCents,
+    payment_pix_enabled: parsed.data.paymentPixEnabled,
+    payment_cash_enabled: parsed.data.paymentCashEnabled,
+    payment_card_on_delivery_enabled: parsed.data.paymentCardOnDeliveryEnabled,
+    pix_key: parsed.data.pixKey,
+    pix_receiver_name: parsed.data.pixReceiverName,
   };
 
   if (canToggleStoreActive(membership.role)) {
@@ -113,6 +133,7 @@ export async function updateStoreSettingsAction(
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/configuracoes");
+  revalidatePath("/dashboard/pedidos");
 
   return { status: "success", message: "Configurações salvas com sucesso." };
 }
