@@ -250,18 +250,80 @@ contra Supabase real ainda não ocorreu.
 
 ### O que foi validado localmente
 
-| Verificação            | Resultado                                                                        |
-| ---------------------- | -------------------------------------------------------------------------------- |
-| `npm run typecheck`    | OK                                                                               |
-| `npm run lint`         | OK, sem avisos                                                                   |
-| `npm test`             | **104 aprovados / 45 ignorados** (14 arquivos; 3 ignorados)                      |
-| `npm run build`        | OK, inclui `/dashboard/pedidos` e `/loja/[slug]/pedido/[numero]`                 |
-| `npm run format:check` | Falha em arquivos pré-existentes (fim de linha); novos arquivos estão formatados |
+| Verificação            | Resultado                                                        |
+| ---------------------- | ---------------------------------------------------------------- |
+| `npm run typecheck`    | OK                                                               |
+| `npm run lint`         | OK, sem avisos                                                   |
+| `npm test`             | **104 aprovados / 45 ignorados** (14 arquivos; 3 ignorados)      |
+| `npm run build`        | OK, inclui `/dashboard/pedidos` e `/loja/[slug]/pedido/[numero]` |
+| `npm run format:check` | OK                                                               |
 
 Os 45 testes ignorados por `npm test` são todos de Vitest e exigem Supabase de teste: 27 de
 Fundação/cardápio e 18 de pedidos (`tests/integration/orders.test.ts`). O E2E roda em suíte separada
 (`npm run test:e2e`) e também não é executado sem `SUPABASE_TEST_*`. Nenhum deles conta como
 aprovado.
+
+### Evidência do bloqueio de infraestrutura (2026-10-29)
+
+| Verificação                              | Resultado                                                |
+| ---------------------------------------- | -------------------------------------------------------- |
+| `.env.local`                             | ausente (apenas `.env.example`)                          |
+| `SUPABASE_TEST_URL` e chaves de teste    | ausentes                                                 |
+| `SUPABASE_ACCESS_TOKEN`                  | ausente                                                  |
+| `npx supabase projects list`             | `AccessTokenRequiredError`                               |
+| `npx supabase status` → `linked_project` | `null`                                                   |
+| Docker local                             | indisponível (`dockerDesktopLinuxEngine` não encontrado) |
+
+Nenhuma migração foi aplicada, nenhum teste de integração/E2E foi executado e nenhum advisor ou
+`db lint` foi rodado. Nada nesta seção deve ser lido como resultado remoto.
+
+### Correções aplicadas na revisão de homologação
+
+Nenhuma foi validada contra Supabase real; entram como pendentes de verificação na FASE de
+integração.
+
+- **Idempotência após pausa/desativação:** a RPC `create_order` agora carrega a loja por slug, toma
+  o lock da chave e devolve o pedido original antes de exigir `active`/`accepting_orders`. Uma
+  retentativa idêntica continua retornando o mesmo pedido mesmo que a loja tenha sido pausada ou
+  desativada; pedidos novos continuam bloqueados.
+- **Limite de adicionais no banco:** `create_order` recusa mais de 50 adicionais por item, alinhado
+  ao limite da aplicação.
+- **Integridade do cadastro:** checkout anônimo não sobrescreve mais `customers.name` de um telefone
+  já cadastrado; o pedido mantém seu próprio snapshot de nome.
+- **Hash determinístico:** a quantidade passou a compor a ordenação canônica dos itens.
+- **Cobertura nova (Vitest):** retentativa após pausa e desativação, limite de 50 adicionais,
+  preservação do nome do cadastro e numeração concorrente sem repetição.
+- **Cobertura nova (E2E):** segundo pedido com retirada e Pix manual, incluindo chave exibida,
+  endereço nulo no banco e acompanhamento.
+- **Formatação:** `endOfLine: "auto"` no Prettier evita reescrever 98 arquivos por CRLF; tabelas de
+  três documentos foram alinhadas sem mudança de conteúdo.
+
+### Critérios de aceite da Etapa 3
+
+- [ ] As três migrações aplicadas no projeto de homologação, sem `reset` e sem alterar histórico
+      anterior.
+- [ ] `create_order` transacional e idempotente validada contra o banco real, incluindo repetição,
+      conflito de payload e concorrência.
+- [ ] Isolamento entre lojas e proteção de PII validados contra o banco real.
+- [ ] Token de acompanhamento validado contra o banco real.
+- [ ] E2E mobile completo (entrega e retirada/Pix) aprovado.
+- [ ] `supabase db lint` e advisors de segurança sem achados críticos.
+- [ ] Pedido real criado pela página pública, visível à loja correta, operado por usuário
+      autorizado e acompanhado pelo consumidor.
+
+### Limitações e classificação
+
+**Bloqueiam a homologação** (tudo acima): ausência de credenciais/projeto vinculado e, portanto,
+migrações não aplicadas, integração/E2E não executados, sem lint de banco e advisors.
+
+**Não bloqueiam a homologação, mas bloqueiam lançamento comercial:**
+
+- Sem gateway de pagamento nem conciliação automática; Pix é manual.
+- Atualização por polling (painel 15 s, acompanhamento 12 s), sem push.
+- Rate limit em memória por instância; apenas os limites de telefone no banco são compartilhados.
+- Lista do painel limitada a 200 pedidos, sem paginação.
+- Sem GPS, aplicativo de entregador, impressão térmica, cupom ou agendamento.
+- Sem notificação por e-mail/SMS/push.
 
 ### O que falta para homologar
 
@@ -276,7 +338,8 @@ aprovado.
 4. Executar `npm run test:e2e` com o fluxo `tests/e2e/orders.spec.ts` (cliente mobile → painel →
    acompanhamento → isolamento da Loja B).
 5. Rodar `supabase db lint` e os advisors de segurança no projeto de testes.
-6. Verificar manualmente o checkout nas duas lojas de homologação, desktop e mobile.
+6. Verificar manualmente o checkout nas duas lojas de homologação, desktop e mobile, incluindo
+   entrega e retirada com Pix manual.
 
 ### Pontos de atenção antes de rodar em Supabase real
 

@@ -168,6 +168,10 @@ Nenhuma dessas tabelas tem grant de escrita para `anon` ou `authenticated`.
   `employee`. As RPCs são a única porta de escrita.
 - `tracking_token_hash` e `request_hash` não são projetados para o cliente. O token bruto nunca é
   gravado.
+- Retentativas idênticas devolvem o pedido original mesmo se a loja for pausada/desativada depois da
+  primeira gravação; a disponibilidade só é exigida para pedidos novos.
+- Checkout anônimo não sobrescreve o nome de um cadastro existente; o pedido guarda seu próprio
+  snapshot.
 - Triggers `private.guard_order_update()`, `private.guard_order_child_insert()` e
   `private.guard_order_event_insert()` congelam dados comerciais e impedem mistura de `store_id`.
 - Os telefones/endereços de clientes ficam restritos ao tenant e não aparecem na página pública do
