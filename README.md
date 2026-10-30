@@ -4,10 +4,12 @@ Plataforma SaaS multiempresa de delivery para hamburguerias, pizzarias, lanchone
 Comercialização por assinatura mensal por estabelecimento, sem comissão por pedido.
 
 **Status atual: Etapas 1 e 2 homologadas** em projeto Supabase exclusivo de testes (2026-10-29).
+**Etapa 3 implementada e validada localmente; homologação em Supabase real pendente.**
 
 A plataforma entrega autenticação, isolamento multiempresa por RLS, painel do estabelecimento,
-superadministrador, cardápio digital com categorias/produtos/adicionais e imagens, e página pública
-mobile-first. Carrinho, checkout, pedidos, entregas e cobrança ainda não fazem parte desta etapa.
+superadministrador, cardápio digital com categorias/produtos/adicionais e imagens, página pública
+mobile-first, carrinho, checkout sem login, criação transacional e idempotente de pedidos, painel de
+operação e acompanhamento por link com token. Entregas, GPS e cobrança ainda não fazem parte.
 
 > Resultados reais, correções e pendências não bloqueantes: [docs/homologation.md](docs/homologation.md).
 
@@ -93,6 +95,10 @@ As migrações versionadas ficam em `supabase/migrations` e devem ser aplicadas 
    compostas por loja.
 5. `20261029130100_menu_security.sql` — RLS e grants do cardápio.
 6. `20261029130200_product_image_storage.sql` — políticas do bucket `product-images`.
+7. `20261029140000_orders_schema.sql` — clientes, pedidos, itens, adicionais, eventos e configurações
+   de checkout.
+8. `20261029140100_orders_security.sql` — RLS e grants das tabelas de pedido.
+9. `20261029140200_orders_functions.sql` — criação transacional, acompanhamento e máquina de estados.
 
 Com Supabase CLI:
 
@@ -189,9 +195,11 @@ npm run dev
 - `/login` — acesso administrativo
 - `/dashboard` — painel da loja
 - `/dashboard/produtos` — gestão do cardápio (owner/manager)
-- `/dashboard/configuracoes` — dados públicos da loja (owner/manager)
+- `/dashboard/pedidos` — fila e operação de pedidos (owner/manager/employee)
+- `/dashboard/configuracoes` — dados públicos e checkout da loja (owner/manager)
 - `/admin` — superadministrador
-- `/loja/[slug]` — cardápio público da loja
+- `/loja/[slug]` — cardápio público, carrinho e checkout
+- `/loja/[slug]/pedido/[numero]` — acompanhamento sem login (link com token)
 
 ## Cardápio digital
 
@@ -201,8 +209,8 @@ npm run dev
 - Associação de grupos a produtos, com validação de capacidade (opções disponíveis × mínimo/máximo).
 - Upload de imagem JPEG/PNG/WebP até 2 MB, validação de bytes no servidor, conversão/redimensionamento
   para WebP e caminho `{store_id}/products/{product_id}/{uuid}.webp`.
-- Página pública mobile-first com categorias, produtos, imagens, preços, grupos de adicionais e
-  prévia interativa de seleção (sem carrinho ou pedido).
+- Página pública mobile-first com categorias, produtos, imagens, preços, grupos de adicionais,
+  prévia interativa e carrinho/checkout.
 - A remoção/substituição de imagem apaga somente arquivos sob o prefixo daquele produto.
 
 Rotas de API autenticadas:
@@ -211,6 +219,29 @@ Rotas de API autenticadas:
 - `DELETE /api/dashboard/products/[id]/image` — remove a imagem do produto.
 
 A rota usa a sessão do usuário e as políticas de Storage; nunca usa `service_role` no navegador.
+
+## Pedidos e checkout
+
+- Configuração por loja: aceitar/pausar pedidos, entrega/retirada, taxa fixa, pedido mínimo, Pix
+  manual, dinheiro e cartão na entrega.
+- Carrinho responsivo salvo em `localStorage` e reconciliado com o catálogo (produto, preço ou
+  adicional alterado/removido).
+- Checkout sem login: nome, WhatsApp, entrega/retirada, endereço, pagamento, observações e revisão.
+- A RPC `create_order` recalcula todos os preços no banco, valida disponibilidade/grupos/mínimo e
+  grava cliente, pedido, itens, adicionais e evento inicial na mesma transação. O navegador nunca
+  define o total.
+- Idempotência por tentativa (chave + hash do payload + advisory lock) evita pedidos duplicados,
+  inclusive com cliques simultâneos.
+- Painel `/dashboard/pedidos` com fila, filtro, busca, histórico e transições validadas por papel:
+  owner/manager cancelam e gerenciam pagamento; employee opera o andamento; driver não acessa.
+- Pagamento é independente do andamento. Pix nunca é marcado como pago automaticamente.
+- Acompanhamento público por slug + número + token de 32 bytes (SHA-256 no banco, token no fragmento
+  da URL), com `noindex`. Não há consulta por ID ou número sequencial.
+- Atualização periódica (15 s no painel, 12 s no acompanhamento) com botão manual; PostgreSQL é a
+  fonte de verdade. Realtime/push não é usado nesta etapa.
+- Botão de WhatsApp (`wa.me`) após o pedido existir, sem envio automático.
+
+Detalhes: [docs/orders.md](docs/orders.md).
 
 ## Testes
 
@@ -221,8 +252,10 @@ npm test                 # unitários + integração (integração é ignorada s
 npm run test:e2e         # requer: npx playwright install chromium
 ```
 
-Situação atual: **63 testes unitários, 27 de integração com Supabase real e 12 E2E aprovados**.
-O detalhamento e as credenciais de ambiente estão em [docs/homologation.md](docs/homologation.md).
+Situação atual: **104 testes Vitest aprovados** (unitários e contratuais) e **41 ignorados** — os 27
+testes de integração da Fundação/cardápio e os 14 de pedidos, que exigem `SUPABASE_TEST_*`. Os 12 E2E
+das etapas anteriores foram aprovados na homologação; o E2E de pedidos ainda não foi executado
+contra Supabase real. O detalhamento está em [docs/homologation.md](docs/homologation.md).
 
 O Vitest e o Playwright carregam `.env.local` automaticamente. O E2E autenticado da Fundação
 (`tests/e2e/homologation.spec.ts`) é ignorado quando as credenciais `DEMO_*`/`SUPERADMIN_*` não estão
@@ -262,6 +295,23 @@ Cobertura de isolamento em `tests/integration/rls.test.ts`:
 - preços negativos/absurdos, seleção inconsistente, caminho de imagem inválido e duplicidade;
 - uploads isolados por loja, leitura pública da imagem e deleção restrita ao gestor da loja.
 
+`tests/integration/orders.test.ts` cobre pedidos (ignorado sem `SUPABASE_TEST_*`):
+
+- criação transacional com snapshots, cliente, evento inicial e token de acompanhamento;
+- preços/totais enviados pelo navegador são ignorados e recalculados;
+- idempotência: repetição devolve o mesmo pedido, conteúdo divergente gera conflito e requisições
+  simultâneas não duplicam;
+- produto/adicional indisponível, adicional de outro produto/loja, grupo obrigatório e pedido mínimo;
+- loja pausada/inativa, entrega ou pagamento desabilitado;
+- isolamento de tenant e PII; `driver` sem acesso; anon não lê tabelas;
+- transições válidas/inválidas, concorrência, cancelamento e pagamento separados;
+- escrita direta bloqueada; acompanhamento exige slug + número + token;
+- rate limit por telefone.
+
+O E2E `tests/e2e/orders.spec.ts` percorre o fluxo completo em viewport mobile (cardápio → carrinho →
+checkout → confirmação → painel do owner → todos os status → acompanhamento → isolamento da Loja B),
+mas ainda não foi executado contra Supabase real.
+
 ## Scripts
 
 | Comando                        | Descrição                       |
@@ -282,9 +332,9 @@ Cobertura de isolamento em `tests/integration/rls.test.ts`:
 
 ```text
 src/
-  app/                  rotas (auth, dashboard, admin, loja pública, API de imagem)
-  components/           UI, layout e prévia de adicionais
-  modules/              domínio: auth, stores, memberships, menu, dashboard, platform-admin
+  app/                  rotas (auth, dashboard, admin, loja pública e acompanhamento, API de imagem)
+  components/           UI, layout, cardápio/carrinho, acompanhamento e fila de pedidos
+  modules/              domínio: auth, stores, memberships, menu, orders, dashboard, platform-admin
   lib/                  Supabase, validação de env, erros, redirects, utilitários
   types/database.ts     tipos do schema (mantidos manualmente nesta etapa)
 supabase/migrations/    SQL versionado
@@ -295,15 +345,21 @@ docs/                   arquitetura, dados, segurança, homologação e roadmap
 
 ## Segurança em resumo
 
-- RLS habilitado nas tabelas da Fundação e do cardápio, com permissões por coluna.
+- RLS habilitado nas tabelas da Fundação, do cardápio e de pedidos, com permissões por coluna.
 - Funções de autorização no schema não exposto `private` (sem RPC público).
 - Usuário só enxerga lojas das quais é membro; superadministrador é exceção explícita.
 - `store_id` enviado pelo cliente nunca é confiado: toda ação deriva a loja ativa da sessão.
-- FKs compostas impedem produto/categoria/grupo/opção de lojas diferentes.
+- FKs compostas impedem produto/categoria/grupo/opção/pedido de lojas diferentes.
 - Página pública usa cliente anônimo sem sessão e só lê lojas e itens publicáveis.
 - Desativar loja é soft disable: nenhum dado é apagado.
 - Imagens: bucket público, limite de 2 MB, MIME permitido, validação de bytes e conversão para WebP
   no servidor; políticas de Storage por loja para upload/exclusão.
+- Checkout: a RPC recalcula preços no banco, valida disponibilidade/grupos/mínimo e ignora totais do
+  navegador; criação transacional e idempotente.
+- Pedidos: RLS restrita a owner/manager/employee; escritas apenas por RPC; `driver` sem acesso.
+- Acompanhamento por token de 32 bytes (SHA-256 no banco, fragmento da URL, `noindex`); sem consulta
+  por ID/número.
+- Rate limit por IP + loja e por telefone no banco; sem CAPTCHA.
 - Cookies de Auth com `httpOnly` e `secure` em produção.
 - Chaves secretas ficam apenas no servidor/scripts.
 - Proteção contra rebaixamento/exclusão do último proprietário e contra gerente desativando a loja.
@@ -315,10 +371,11 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - [Arquitetura](docs/architecture.md)
 - [Modelo de dados](docs/data-model.md)
 - [Segurança](docs/security.md)
+- [Pedidos](docs/orders.md)
 - [Homologação](docs/homologation.md)
 - [Roadmap](docs/roadmap.md)
 
-## Limitações conhecidas das Etapas 1 e 2
+## Limitações conhecidas
 
 - Não há tela de criação de lojas/usuários; isso é feito por scripts com service role.
 - Não há gestão de funcionários na interface (apenas o modelo e as políticas).
@@ -330,16 +387,25 @@ Detalhes completos em [docs/security.md](docs/security.md).
   no cardápio público; escrita direta via API pode contornar a checagem de capacidade (mas não o RLS).
 - A validação real de conteúdo da imagem ocorre na rota do app; uploads diretos na Storage API por
   gestores validam apenas o MIME declarado e o limite do bucket.
-- Sem carrinho, checkout, pedidos, entregas ou cobrança.
+- Sem carrinho off-line ou sincronização entre dispositivos: o carrinho fica no `localStorage`.
+- Sem gateway de pagamento, cobrança automática, conciliação, impressão térmica, cupom ou desconto.
+- Pix é manual e nunca é marcado como pago automaticamente.
+- Sem GPS, aplicativo de entregador, atribuição de entregador ou rastreamento.
+- Atualização de pedidos por polling (15 s no painel, 12 s no acompanhamento), não por push/Realtime.
+- Rate limit em memória é por instância; os limites por telefone no banco são compartilhados.
+- Lista de pedidos limitada a 200 por consulta, sem paginação.
 - Sem paginação na lista administrativa de lojas (limite de 200).
-- Sem MFA, auditoria de ações, rate limiting próprio ou CSP completa.
+- Sem MFA, auditoria de ações, CSP completa ou limitador distribuído.
 - O cookie de loja ativa usa `secure` quando `NODE_ENV=production`.
 - Leaked password protection (HIBP) desabilitada: habilitar no dashboard do Supabase.
 - Entrega real de e-mail de recuperação não verificada (fluxo validado via token); configurar
   SMTP para produção.
 - Rotação de token após a expiração de 1h não simulada; persistência de sessão em reload verificada.
+- **Etapa 3 ainda não homologada em Supabase real**: migrações, integração e E2E de pedidos estão
+  pendentes de execução com credenciais do projeto de testes.
 
 ## Próxima etapa recomendada
 
-Iniciar a Etapa 3 — carrinho, checkout e pedidos, com snapshots de preço e itens no momento do
-pedido. Ver [docs/roadmap.md](docs/roadmap.md).
+1. Homologar a Etapa 3: aplicar as três migrações no projeto de testes, executar integração e E2E e
+   validar o fluxo nas duas lojas de homologação.
+2. Depois, iniciar a Etapa 4 — Entregas, conforme [docs/roadmap.md](docs/roadmap.md).

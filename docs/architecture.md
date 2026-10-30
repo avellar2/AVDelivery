@@ -51,22 +51,27 @@ src/
     dashboard/
       layout.tsx               shell autenticado + contexto da loja ativa
       page.tsx                 visão geral / seleção de loja / estado sem loja
-      configuracoes/           edição dos dados públicos da loja
+      configuracoes/           edição dos dados públicos e do checkout da loja
       produtos/                painel do cardápio (produtos/categorias/adicionais)
+      pedidos/                 fila e operação de pedidos
     admin/
       layout.tsx               proteção de superadministrador
       page.tsx                 lista global de estabelecimentos
-    loja/[slug]/page.tsx       cardápio público (cliente anônimo)
+    loja/[slug]/page.tsx       cardápio público + carrinho/checkout
+    loja/[slug]/pedido/[numero]/page.tsx  acompanhamento por token (sem login)
     error.tsx / not-found.tsx
   components/
     layout/                    shell, navegação, seletor de loja, logout
     ui/                        botões, inputs, cards, alertas, badges, estados
     menu/                      prévia interativa de adicionais
+    storefront/                cardápio, carrinho/checkout e acompanhamento
+    dashboard/                 fila de pedidos
   modules/
     auth/                      sessão, validações, Server Actions, site URL
     memberships/               papéis, resolução de loja ativa, consultas, guard
     stores/                    contexto do painel, consultas, validações, ações
     menu/                      validações, imagens, consultas, ações, tipos
+    orders/                    carrinho, preços, payload, idempotência, RPCs e ações
     dashboard/                 definição da navegação
     platform-admin/            guard e consultas globais
   lib/
@@ -174,6 +179,31 @@ cookies de sessão**. Consequências:
   desativados permanecem no bucket (URL pública), conforme decisão documentada em
   [security.md](security.md).
 
+## Pedidos e checkout
+
+- `src/modules/orders` concentra carrinho, preços, canonicalização do payload, hashes, validação
+  Zod, rate limit, consultas e Server Actions. A página pública importa apenas os utilitários puros
+  do carrinho; as ações rodam no servidor.
+- O carrinho é salvo em `localStorage` por loja e reconciliado com o catálogo ao abrir a página.
+  Preço, disponibilidade e taxa nunca são confiados ao navegador.
+- A criação do pedido chama a RPC `create_order`, `security definer` com `search_path = ''`. A função
+  é a única escrita de pedidos: valida loja/pagamento/entrega, recalcula todos os preços a partir do
+  catálogo, confere grupos de adicionais, aplica mínimo e rate limit por telefone e grava cliente,
+  pedido, itens, adicionais e evento inicial na mesma transação.
+- Idempotência: chave por tentativa + hash canônico do payload, advisory lock transacional e
+  `unique (store_id, idempotency_key)`. Retentativa igual devolve o pedido original; conteúdo
+  diferente gera conflito.
+- O painel `/dashboard/pedidos` lê pela sessão do usuário (RLS exige owner/manager/employee).
+  Avanço de status e pagamento passam por `update_order_status` e `update_order_payment_status`, que
+  validam papel, transição e concorrência (`select ... for update`). `driver` não acessa pedidos.
+- O acompanhamento público usa slug + número + hash SHA-256 de um token de 32 bytes. O token viaja
+  no fragmento `#t=...` e é lido no cliente; o banco não guarda o valor bruto.
+- A página pública e o painel não usam Realtime do Supabase: os cookies são `httpOnly` e as tabelas
+  não são legíveis por `anon`. A atualização é periódica (15 s no painel, 12 s no acompanhamento),
+  com ressincronização ao voltar para a aba e botão manual. O PostgreSQL é a fonte de verdade.
+
+Detalhes de fluxo, máquina de estados, idempotência e limitações: [orders.md](orders.md).
+
 ## Decisões técnicas
 
 ### Next.js 16 sem Cache Components
@@ -242,5 +272,9 @@ para `store_id`.
 **Etapas 1 e 2 homologadas em 2026-10-29** em projeto Supabase remoto exclusivo de testes: 90 testes
 Vitest (unitários + 27 integrações com Auth/PostgREST/Storage), 12 E2E, build, DB lint e advisors de
 segurança (sem avisos de `SECURITY DEFINER`). Pendências não bloqueantes: HIBP, entrega real de
-e-mail e rotação após expiração de 1h. Ver [homologation.md](homologation.md). A Etapa 3 não foi
-iniciada.
+e-mail e rotação após expiração de 1h.
+
+**Etapa 3 implementada**, com validação local concluída (typecheck, lint, 104 testes Vitest e
+build). As três migrações de pedidos ainda não foram aplicadas ao projeto de testes e a suíte de
+integração/E2E de pedidos não foi executada por falta de credenciais; portanto a etapa **não está
+homologada**. Ver [orders.md](orders.md) e [homologation.md](homologation.md).

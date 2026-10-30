@@ -14,6 +14,13 @@
 | Erro interno exposto ao usuário                                | `AppError` com mensagem pública e log apenas da mensagem             |
 | Sessão fixada / tokens no browser                              | cookies `httpOnly` do `@supabase/ssr`; auth somente server-side      |
 
+| Cliente adulterar preço/total no checkout                  | RPC recalcula tudo a partir do catálogo; valores do browser são ignorados |
+| Pedido duplicado por duplo clique/retentativa              | chave de idempotência + hash + advisory lock + unique por loja       |
+| Loja A ler/operar pedidos da Loja B                        | RLS por vínculo + RPCs com `has_store_role` + testes                 |
+| Consulta arbitrária de pedido por ID/número                | token de 32 bytes; banco guarda só SHA-256; busca exige slug + número + hash |
+| Vazamento do token por referer/log/analytics               | token no fragmento da URL, lido no cliente; sem logs e com noindex   |
+| Abuso de checkout                                         | rate limit por IP/loja + limites por telefone no banco               |
+
 ## Fronteiras de confiança
 
 1. **Navegador** — não confiável. Nenhuma decisão de autorização acontece nele.
@@ -134,6 +141,48 @@ RLS habilitado em `categories`, `products`, `option_groups`, `product_option_gro
 - Categorias/grupos com vínculos são protegidos por `on delete restrict`.
 - A capacidade mínimo/máximo × opções disponíveis é validada nas Server Actions e no cardápio
   público; o público também faz clamp defensivo.
+
+### Pedidos (Etapa 3)
+
+RLS habilitado em `customers`, `orders`, `order_items`, `order_item_options` e `order_events`.
+Nenhuma dessas tabelas tem grant de escrita para `anon` ou `authenticated`.
+
+| Tabela               | Leitura pública | Leitura autenticada                     | Escrita                     |
+| -------------------- | --------------- | --------------------------------------- | --------------------------- |
+| `customers`          | —               | owner/manager/employee do tenant ou admin | somente RPC `create_order` |
+| `orders`             | —               | idem                                    | RPC de criação/status/pagamento |
+| `order_items`        | —               | idem                                    | RPC `create_order`          |
+| `order_item_options` | —               | idem                                    | RPC `create_order`          |
+| `order_events`       | —               | idem                                    | RPCs de status              |
+
+- As políticas usam `private.has_store_role(store_id, ['owner','manager','employee'])` ou
+  `private.is_platform_admin()`.
+- `driver` não lê pedidos nesta etapa.
+- `create_order` e `get_order_tracking` são executáveis por `anon` e `authenticated` porque o
+  checkout e o acompanhamento são públicos. A função de criação só grava um pedido validado na loja
+  ativa, recalcula todos os preços e não devolve dados de outros pedidos; a de acompanhamento exige
+  slug + número + hash e devolve apenas aquele pedido.
+- `update_order_status` e `update_order_payment_status` são executáveis apenas por `authenticated` e
+  `service_role`; internamente exigem vínculo e validam a máquina de estados.
+- Escrita direta nas tabelas é revogada de `anon`/`authenticated` (`revoke all`), inclusive para
+  `employee`. As RPCs são a única porta de escrita.
+- `tracking_token_hash` e `request_hash` não são projetados para o cliente. O token bruto nunca é
+  gravado.
+- Triggers `private.guard_order_update()`, `private.guard_order_child_insert()` e
+  `private.guard_order_event_insert()` congelam dados comerciais e impedem mistura de `store_id`.
+- Os telefones/endereços de clientes ficam restritos ao tenant e não aparecem na página pública do
+  cardápio.
+
+### Rate limit e abuso
+
+- Checkout: 10 tentativas/min por IP + loja, em memória por instância.
+- Acompanhamento: 60 consultas/min por IP, em memória por instância.
+- Banco: 3 pedidos/min e 20/h por telefone + loja, compartilhados entre instâncias.
+- Itens (1 a 50), quantidades (1 a 99), observações (300/500) e endereço têm limites no Zod e no
+  banco.
+
+O limitador em memória não é distribuído; em múltiplas instâncias cada uma mantém sua própria
+contagem. Os limites no banco são a barreira compartilhada. Não há CAPTCHA nesta etapa.
 
 ## Storage de imagens
 
@@ -275,6 +324,12 @@ A página `/loja/[slug]` expõe apenas:
 Não são expostos: membros, papéis, e-mails, `platform_admins`, timestamps internos de vínculos,
 itens indisponíveis/inativos ou dados de outra loja.
 
+Pedidos **não** são públicos. O acompanhamento exige o link com slug, número e token de 32 bytes; o
+banco guarda apenas o SHA-256 e devolve somente aquele pedido. O token viaja no fragmento `#t=...`
+(não enviado em navegações nem em `Referer`), é lido no cliente e repassado por Server Action. A
+página usa `noindex` e a aplicação não registra o token em logs. Não há consulta por ID ou por
+número sequencial.
+
 ## Segredos e variáveis
 
 - `SUPABASE_SERVICE_ROLE_KEY` não é importada em `src/`; aparece somente em `scripts/`.
@@ -325,12 +380,15 @@ do Next.
 ## Logs
 
 `reportServerError(scope, error)` registra apenas a mensagem do erro. Erros de Auth registram
-somente o código. Senhas, chaves e cabeçalhos de autorização nunca são logados.
+somente o código. Senhas, chaves, cabeçalhos de autorização, tokens de acompanhamento, telefones e
+endereços nunca são logados.
 
 ## Limitações e riscos residuais
 
 1. **Sem CSP completa** — exigiria nonce/hash para os scripts do Next.
-2. **Sem rate limiting próprio** — depende dos limites do Supabase Auth.
+2. **Rate limiting parcial** — login/recuperação dependem dos limites do Supabase Auth; checkout e
+   acompanhamento usam limitador em memória por instância + limites por telefone no banco. Não há
+   limitador distribuído nem CAPTCHA.
 3. **Sem MFA** para superadministradores.
 4. **Sem trilha de auditoria** de alterações de papel/loja.
 5. **Criação de lojas/usuários apenas por script** — não há UI administrativa nesta etapa.
@@ -355,6 +413,13 @@ somente o código. Senhas, chaves e cabeçalhos de autorização nunca são loga
     Storage API (somente gestores) têm apenas MIME declarado/limite do bucket.
 15. **Produtos não são excluídos fisicamente** — arquivamento por `available=false` para preservar
     histórico futuro de pedidos.
+16. **Atualização de pedidos por polling** — o navegador não autentica Realtime (cookies `httpOnly`);
+    painel e acompanhamento consultam a cada 15 s/12 s. Não há push.
+17. **Checkout e acompanhamento são públicos** — as RPCs são executáveis com a chave anon; a proteção
+    está na validação completa, no recálculo de preços, no token de alta entropia e nos rate limits,
+    não em autenticação.
+18. **Etapa 3 não homologada em Supabase real** — migrações, integração e E2E de pedidos ainda não
+    foram executados no projeto de testes. Ver [homologation.md](homologation.md).
 
 ## Checklist operacional
 
@@ -367,5 +432,7 @@ somente o código. Senhas, chaves e cabeçalhos de autorização nunca são loga
 - [x] Superadministrador criado por script, com senha forte.
 - [x] 27 testes de integração executados e verdes em Supabase real.
 - [x] Login, logout, recuperação, cardápio, RLS de imagem e uploads validados.
+- [x] Etapa 3 validada localmente: typecheck, lint, 104 testes Vitest e build.
+- [ ] Aplicar as migrações de pedidos e executar integração/E2E da Etapa 3 no Supabase de testes.
 - [ ] Habilitar leaked password protection (HIBP) no dashboard.
 - [ ] Backups automáticos habilitados no Supabase de produção.

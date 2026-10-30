@@ -5,7 +5,11 @@
 **Etapas 1 e 2 homologadas em 2026-10-29**, com um item de endurecimento não bloqueante pendente
 (proteção de senhas vazadas, configuração manual no painel).
 
-A Etapa 1 está detalhada abaixo; a homologação da Etapa 2 está na seção final.
+A Etapa 3 está **implementada e validada localmente**, mas **não homologada**: as migrações de
+pedidos não foram aplicadas ao projeto de testes e as suítes de integração/E2E de pedidos não foram
+executadas por falta de credenciais do Supabase nesta máquina. Ver a seção final.
+
+A Etapa 1 está detalhada abaixo; a homologação da Etapa 2 está na seção seguinte.
 
 Projeto Supabase remoto exclusivo de homologação:
 
@@ -139,8 +143,8 @@ habilitado no dashboard (Authentication > Password Security). Não bloqueia a ho
   e-mail e a rota de confirmação estão habilitados.
 - **Renovação após expiração do access token**: a persistência de sessão em reloads foi verificada;
   a rotação após 1 hora não foi simulada.
-- Sem MFA, auditoria de ações, rate limiting próprio ou CSP completa (escopo da Etapa 1).
-- A Etapa 2 (cardápio) **não foi iniciada**.
+- Sem MFA, auditoria de ações, rate limiting distribuído ou CSP completa (escopo da Etapa 1).
+- A Etapa 2 (cardápio) foi homologada depois; ver a seção correspondente abaixo.
 
 ## Dados de homologação preservados no projeto de testes
 
@@ -238,3 +242,47 @@ o bucket sem objetos órfãos.
 - Uploads diretos na Storage API por gestores validam MIME declarado/limite, não os bytes.
 - Produtos são arquivados, não excluídos fisicamente.
 - HIBP, entrega real de e-mail e rotação após 1h continuam como pendências da Fundação.
+
+## Etapa 3 — Pedidos (implementação local; homologação pendente)
+
+**NÃO HOMOLOGADA.** O código, as três migrações e os testes foram concluídos, mas a validação
+contra Supabase real ainda não ocorreu.
+
+### O que foi validado localmente
+
+| Verificação        | Resultado                                                       |
+| ------------------ | --------------------------------------------------------------- |
+| `npm run typecheck`| OK                                                              |
+| `npm run lint`     | OK, sem avisos                                                  |
+| `npm test`         | **104 aprovados / 41 ignorados** (14 arquivos; 3 ignorados)     |
+| `npm run build`    | OK, inclui `/dashboard/pedidos` e `/loja/[slug]/pedido/[numero]` |
+| `npm run format:check` | Falha em arquivos pré-existentes (fim de linha); novos arquivos estão formatados |
+
+Os 41 testes ignorados são exatamente a integração com Supabase (`tests/integration/orders.test.ts`)
+e os E2E que exigem `SUPABASE_TEST_*`/credenciais. Eles **não** contam como aprovados.
+
+### O que falta para homologar
+
+1. Definir `SUPABASE_TEST_URL`, `SUPABASE_TEST_ANON_KEY` e `SUPABASE_TEST_SERVICE_ROLE_KEY` de um
+   projeto exclusivo de testes.
+2. Aplicar, sem `reset`, as migrações:
+   - `20261029140000_orders_schema.sql`
+   - `20261029140100_orders_security.sql`
+   - `20261029140200_orders_functions.sql`
+3. Executar `npm test` com a integração habilitada e confirmar criação transacional, idempotência,
+   concorrência, isolamento entre lojas, preços adulterados, permissões e token de acompanhamento.
+4. Executar `npm run test:e2e` com o fluxo `tests/e2e/orders.spec.ts` (cliente mobile → painel →
+   acompanhamento → isolamento da Loja B).
+5. Rodar `supabase db lint` e os advisors de segurança no projeto de testes.
+6. Verificar manualmente o checkout nas duas lojas de homologação, desktop e mobile.
+
+### Pontos de atenção antes de rodar em Supabase real
+
+- As migrações são novas e não alteram migrações já aplicadas; `db push --dry-run` deve listar
+  exatamente as três.
+- Os testes criam e removem seus próprios usuários, lojas, cardápio e pedidos. Nunca aponte
+  `SUPABASE_TEST_*` para produção.
+- O E2E de pedidos exige o app rodando na porta configurada pelo Playwright e as migrações
+  aplicadas.
+- A homologação só pode ser declarada com os resultados reais de integração e E2E, não com testes
+  ignorados.

@@ -65,23 +65,46 @@ Critério de pronto: **atendido** — um gestor cadastrou categoria, produto, im
 associação, e o cardápio apareceu na página pública; isolamento entre lojas e uploads foram
 validados em Supabase real.
 
-## Etapa 3 — Pedidos (próxima; não iniciada)
+## Etapa 3 — Carrinho, checkout e pedidos (implementada; homologação pendente)
 
-Objetivo: receber e acompanhar pedidos sem pagamento online obrigatório.
+> **Estado:** código, migrações e testes implementados; validação local concluída (typecheck, lint,
+> 104 testes Vitest e build). A homologação em Supabase real — migrações aplicadas, integração e E2E —
+> **não** foi executada por falta de credenciais do projeto de testes. Ver
+> [orders.md](orders.md) e [homologation.md](homologation.md).
 
-Escopo:
+Objetivo: receber e acompanhar pedidos sem pagamento online obrigatório e sem login do cliente.
 
-- Tabelas `customers`, `orders`, `order_items` com `store_id` e snapshots de preço.
-- Fluxo público: carrinho → identificação do cliente → criação do pedido.
-- Painel de pedidos com estados (`pending`, `confirmed`, `preparing`, `ready`, `out_for_delivery`,
-  `delivered`, `canceled`).
-- Realtime opcional via Supabase Realtime por loja.
-- Impressão/WhatsApp como integração simples (link `wa.me`), sem serviço pago.
-- Idempotência na criação de pedido para evitar duplicidade.
-- Testes de transição de estado e isolamento por tenant.
+Entregue:
+
+- [x] Migrações versionadas: `customers`, `orders`, `order_items`, `order_item_options`,
+      `order_events`, enums de status/atendimento/pagamento e configurações de checkout em `stores`.
+- [x] Preços em centavos, snapshots de nome/preço/adicionais e endereço no pedido.
+- [x] Configuração por loja: aceitar pedidos, entrega/retirada, taxa fixa, pedido mínimo, Pix
+      manual, dinheiro e cartão na entrega.
+- [x] Carrinho responsivo na página pública, persistido em `localStorage` e reconciliado com o
+      catálogo (produto/preço/adicional removido ou alterado).
+- [x] Checkout sem login: identificação, endereço, forma de pagamento, revisão e confirmação.
+- [x] Criação transacional via RPC `create_order` (`security definer`, `search_path = ''`), com
+      preços recalculados no banco, snapshots, evento inicial e cliente na mesma transação.
+- [x] Idempotência por chave + hash do payload, com advisory lock e `unique (store_id, chave)`;
+      repetição devolve o mesmo pedido, conteúdo divergente gera conflito.
+- [x] Rate limit em memória por IP + loja e limites por telefone no banco (3/min e 20/h).
+- [x] Painel `/dashboard/pedidos` com fila, filtro, busca, detalhe, histórico e ações por papel.
+- [x] Máquina de estados explícita no banco: `pending`, `accepted`, `preparing`, `ready`,
+      `out_for_delivery`, `delivered`, `canceled`; entrega e retirada têm caminhos distintos.
+- [x] Pagamento separado do andamento; Pix nunca é marcado como pago automaticamente.
+- [x] Acompanhamento sem login por slug + número + token de alta entropia (SHA-256 no banco, token no
+      fragmento da URL); sem consulta por ID/número.
+- [x] Isolamento por tenant na RLS: owner/manager/employee leem; escritas apenas por RPC; `driver`
+      sem acesso nesta etapa.
+- [x] Atualização periódica: 15 s no painel e 12 s no acompanhamento, com ressincronização ao voltar
+      para a aba e botão manual. Push/Realtime documentado como limitação.
+- [x] Link `wa.me` após o pedido existir, sem envio automático nem API paga.
+- [x] Testes unitários, de integração (quando há Supabase de teste) e E2E do fluxo completo.
 
 Critério de pronto: pedido criado na página pública aparece no painel da loja correta, e somente
-nela.
+nela, com criação transacional e idempotente. **Critério ainda não homologado** porque a suíte
+integrada e o E2E não foram executados contra um Supabase real nesta máquina.
 
 ## Etapa 4 — Entregas
 
