@@ -169,7 +169,7 @@ test.describe("cardápio digital", () => {
 
       await page.getByRole("checkbox", { name: new RegExp(optionName) }).check();
       await expect(page.getByText(/29,00/)).toBeVisible();
-      await expect(page.getByText(/carrinho/i)).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Adicionar ao carrinho" })).toBeVisible();
 
       await page.setViewportSize({ width: 390, height: 844 });
       await page.reload();

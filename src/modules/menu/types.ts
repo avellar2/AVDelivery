@@ -91,6 +91,16 @@ export type PublicMenuStore = {
   description: string | null;
   phone: string | null;
   logoUrl: string | null;
+  acceptingOrders: boolean;
+  deliveryEnabled: boolean;
+  pickupEnabled: boolean;
+  deliveryFeeCents: number;
+  minOrderCents: number;
+  paymentPixEnabled: boolean;
+  paymentCashEnabled: boolean;
+  paymentCardOnDeliveryEnabled: boolean;
+  pixKey: string | null;
+  pixReceiverName: string | null;
 };
 
 export type PublicMenu = {

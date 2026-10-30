@@ -3,6 +3,10 @@ export function cn(...values: Array<string | false | null | undefined>): string 
 }
 
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" });
+const dateTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
+  dateStyle: "short",
+  timeStyle: "short",
+});
 const currencyFormatter = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
 export function formatDate(value: string | Date): string {
@@ -11,6 +15,14 @@ export function formatDate(value: string | Date): string {
     return "—";
   }
   return dateFormatter.format(date);
+}
+
+export function formatDateTime(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+  return dateTimeFormatter.format(date);
 }
 
 export function formatCurrency(cents: number): string {
