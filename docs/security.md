@@ -215,6 +215,26 @@ grant de escrita para `anon` ou `authenticated`: a única porta de escrita são 
 - `src/lib/supabase/admin.ts` usa `service_role` e é `server-only`, restrito a fluxos
   administrativos internos (cadastro por e-mail); nunca é importado por componente de cliente.
 
+### Localização (Etapa 5)
+
+- A posição fica em `private.delivery_locations`, schema **não exposto** pela Data API. Não há
+  `SELECT`/`INSERT`/`UPDATE`/`DELETE` para `anon` ou `authenticated`; só `service_role` acessa
+  diretamente, para fixtures.
+- Escrita exclusivamente por `share_delivery_location` (`SECURITY DEFINER`, `search_path = ''`), que
+  deriva o entregador de `auth.uid()` e valida, sob lock da entrega: papel `driver`, vínculo com a
+  loja, perfil ativo, posse da entrega, pedido `out_for_delivery`, coordenadas, precisão e horário.
+- `store_id`/`driver_id` nunca vêm do navegador. A FK composta `(store_id, delivery_id)` impede
+  mistura entre lojas mesmo em caminho privilegiado.
+- `get_driver_delivery_location` só devolve a posição ao dono da entrega; qualquer outro perfil
+  autenticado recebe `forbidden`.
+- O cliente recebe a posição apenas via `get_order_tracking` com slug + número + hash do token, e
+  apenas quando a entrega está `picked_up`.
+- Reatribuição, cancelamento, conclusão e remoção de vínculo revogam o envio imediatamente. O
+  trigger apaga a posição no fechamento.
+- Rate limit no servidor: 5 s entre gravações por entrega; amostras fora de ordem são descartadas.
+- Coordenadas não são logadas, não entram em URL e não há histórico de rota. Retenção: somente
+  durante a entrega ativa.
+
 ### Rate limit e abuso
 
 - Checkout: 10 tentativas/min por IP + loja, em memória por instância.
@@ -414,7 +434,7 @@ Usado no login (`next`) e na confirmação de e-mail.
 - `X-Content-Type-Options: nosniff`
 - `X-Frame-Options: DENY`
 - `Referrer-Policy: strict-origin-when-cross-origin`
-- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=(self)`
 
 A aplicação não usa `dangerouslySetInnerHTML`. Server Actions validam origem pelo mecanismo nativo
 do Next.
@@ -470,8 +490,14 @@ endereços nunca são logados.
     entrega conferidos no banco.
 20. **Cadastro de entregador sem convite** — o vínculo exige uma conta já existente criada pelo
     administrador; não há envio de e-mail nem convite por token.
-21. **Sem GPS/rastreamento** — o acompanhamento mostra apenas estado e horários da entrega; não há
-    posição, mapa, rota ou histórico de localização.
+21. **GPS apenas em primeiro plano** — o compartilhamento web depende da página aberta. Com a tela
+    bloqueada ou a aba suspensa, o navegador pode interromper o `watchPosition`; não há garantia de
+    envio contínuo nem homologação em dispositivo físico. Ver [gps.md](gps.md).
+22. **Etapa 5 com homologação parcial** — 2 migrações novas aplicadas (14 no total), 19 testes
+    unitários, 9 integrações e 2 E2E de rastreamento verdes; RLS, grants, revogação e limpeza
+    conferidos no banco. Rastreamento com tela bloqueada permanece pendente.
+23. **Localização é dado pessoal** — o envio é opt-in, limitado à entrega ativa e sem histórico. A
+    posição é apagada ao concluir, cancelar, reatribuir ou parar o compartilhamento.
 
 ## Checklist operacional
 
@@ -487,6 +513,9 @@ endereços nunca são logados.
 - [x] Etapa 3 validada localmente: typecheck, lint e build.
 - [x] Migrações de pedidos aplicadas e integração/E2E da Etapa 3 executados no Supabase de testes.
 - [x] Etapa 4: migrações de entregas aplicadas, RLS e grants conferidos, 14 integrações e E2E verdes.
+- [x] Etapa 5: tabela privada de localização sem acesso pela Data API; RPCs de envio/leitura
+      validadas, revogação e limpeza conferidas, 9 integrações e 2 E2E verdes.
+- [ ] Validar GPS físico e comportamento com tela bloqueada em Android e iOS.
 - [x] `service_role` usada apenas em scripts e em `src/lib/supabase/admin.ts` (server-only).
 - [ ] Habilitar leaked password protection (HIBP) no dashboard.
 - [ ] Backups automáticos habilitados no Supabase de produção.

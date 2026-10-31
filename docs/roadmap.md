@@ -131,7 +131,7 @@ Entregue:
       entregador.
 - [x] RLS de menor privilégio: entregador lê somente as próprias entregas e os pedidos vinculados.
 - [x] Testes unitários, de integração (concorrência, isolamento, revogação) e E2E de 12 passos.
-- [x] Pontos de integração futura com GPS documentados, sem implementação.
+- [x] GPS da entrega implementado na Etapa 5 (homologação parcial web).
 
 Fora do escopo desta etapa: GPS/rastreamento em tempo real, aplicativo nativo, despacho automático,
 comprovante com foto/assinatura e repasse financeiro ao entregador.
@@ -139,7 +139,41 @@ comprovante com foto/assinatura e repasse financeiro ao entregador.
 Critério de pronto: **atendido** — atribuição real, acesso do entregador, início/fim, estados
 consistentes, acompanhamento do cliente e isolamento entre lojas validados contra o Supabase real.
 
-## Etapa 5 — Assinatura e cobrança
+## Etapa 5 — Rastreamento GPS (homologação parcial em 2026-10-31)
+
+> **Estado:** web em primeiro plano homologado em Supabase real: 14 migrações aplicadas sem
+> `reset`, 207 testes Vitest (68 de integração) e 16 E2E. Envio com tela bloqueada/app em segundo
+> plano **não** homologado por falta de dispositivo físico. Resultados em
+> [homologation.md](homologation.md), arquitetura em [gps.md](gps.md) e custos em
+> [gps-costs.md](gps-costs.md).
+
+Objetivo: permitir que o cliente acompanhe a aproximação do entregador durante a entrega.
+
+Entregue:
+
+- [x] Compartilhamento voluntário via `watchPosition`, iniciado apenas por clique do entregador.
+- [x] Tabela privada `private.delivery_locations`, uma linha por entrega, sem histórico, apagada ao
+      concluir/cancelar; sem acesso pela Data API.
+- [x] RPCs `share_delivery_location`, `get_driver_delivery_location` e `clear_delivery_location`,
+      com validação de sessão, papel, vínculo, posse, estado do pedido, coordenadas, precisão,
+      horário, ordem e rate limit.
+- [x] Posição embutida em `get_order_tracking` apenas enquanto `picked_up`; mesmo token do
+      acompanhamento.
+- [x] Mapa MapLibre GL JS + OpenFreeMap no acompanhamento, com marcador, horário e estados ativa /
+      desatualizada / encerrada, sem rota, distância ou ETA.
+- [x] Painel do entregador com estado do GPS, permissão, última posição, aviso de primeiro plano e
+      botão de parar; conclusão da entrega continua funcionando sem GPS.
+- [x] Revogação automática por reatribuição, cancelamento, conclusão e remoção de vínculo.
+- [x] Throttle de 8–60 s no cliente e 5 s no servidor; polling de 12 s no cliente; sem Realtime.
+- [x] 19 testes unitários, 9 de integração e 2 E2E de rastreamento.
+
+Fora do escopo desta etapa: rastreamento garantido com tela bloqueada, histórico de trajeto, rota,
+distância, ETA, aplicativo nativo e mapa no painel da loja.
+
+Critério de pronto: **parcialmente atendido** — o GPS web em primeiro plano foi validado de ponta a
+ponta; o segundo plano depende de app nativo/híbrido e de teste em dispositivo físico.
+
+## Etapa 6 — Assinatura e cobrança
 
 Objetivo: monetizar por estabelecimento.
 
@@ -155,7 +189,7 @@ Escopo:
 
 Critério de pronto: uma loja sem assinatura ativa entra em modo restrito sem perder dados.
 
-## Etapa 6 — Endurecimento
+## Etapa 7 — Endurecimento
 
 - Trilha de auditoria de ações administrativas e mudanças de papel.
 - MFA obrigatório para superadministradores.
@@ -180,6 +214,6 @@ Critério de pronto: uma loja sem assinatura ativa entra em modo restrito sem pe
 ## Fora de escopo até nova decisão
 
 - Aplicativo nativo (iOS/Android).
-- Rastreamento GPS em tempo real.
+- Rastreamento GPS com tela bloqueada/segundo plano.
 - Marketplace ou comissão por pedido.
 - Microsserviços, filas ou Kubernetes.

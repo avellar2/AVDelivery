@@ -2,11 +2,14 @@
 
 ## Status
 
-**Etapas 1 e 2 homologadas em 2026-10-29; Etapas 3 e 4 homologadas em 2026-10-30**, com um item de
-endurecimento não bloqueante pendente (proteção de senhas vazadas, configuração manual no painel).
+**Etapas 1 e 2 homologadas em 2026-10-29; Etapas 3 e 4 homologadas em 2026-10-30; Etapa 5 com
+homologação parcial em 2026-10-31**, com um item de endurecimento não bloqueante pendente (proteção
+de senhas vazadas, configuração manual no painel).
 
-As Etapas 3 e 4 foram validadas contra o projeto Supabase real de homologação, com migrações
-aplicadas, integração, E2E e revisão visual em desktop e mobile. Detalhes nas seções finais.
+As Etapas 3, 4 e 5 foram validadas contra o projeto Supabase real de homologação, com migrações
+aplicadas, integração, E2E e revisão visual em desktop e mobile. Na Etapa 5, o GPS web em primeiro
+plano foi validado; o envio com tela bloqueada/app em segundo plano permanece pendente por falta de
+dispositivo físico. Detalhes nas seções finais.
 
 A Etapa 1 está detalhada abaixo; a homologação da Etapa 2 está na seção seguinte.
 
@@ -538,3 +541,141 @@ npx supabase db advisors --linked --type security
 
 Nunca aponte `SUPABASE_TEST_*` para produção: a suíte cria e remove usuários, lojas, cardápio,
 pedidos e entregadores. As credenciais ficam apenas em `.env.local`.
+
+## Homologação da Etapa 5 — Rastreamento GPS
+
+**HOMOLOGAÇÃO PARCIAL em 2026-10-31** no projeto Supabase exclusivo de testes
+(`jtryfpaxocdiqrehptlz`). O GPS web em primeiro plano foi validado de ponta a ponta. O envio com
+tela bloqueada ou navegador em segundo plano **não** foi homologado: não havia dispositivo físico
+Android/iOS acessível. Nenhum banco de produção foi acessado, nenhum `reset` remoto foi executado e
+nenhuma migração já aplicada foi editada.
+
+### Migrações aplicadas
+
+- `20261031120000_delivery_locations_schema.sql`
+- `20261031120100_delivery_locations_functions.sql`
+
+O `db push --dry-run` listou exatamente as duas migrações pendentes. Foram aplicadas com
+`db push --linked`; o histórico remoto passou a ter **14 migrações**, e as 12 anteriores permaneceram
+intocadas. `supabase migration list` mostra local e remoto alinhados.
+
+### Resultados reais
+
+| Verificação            | Resultado                                                              |
+| ---------------------- | ---------------------------------------------------------------------- |
+| `npm run typecheck`    | OK                                                                     |
+| `npm run lint`         | OK, sem avisos                                                         |
+| `npm run format:check` | OK                                                                     |
+| `npm test`             | **207/207** (21 arquivos), com integração Supabase habilitada          |
+| `npm run test:e2e`     | **16/16**                                                              |
+| `npm run build`        | OK; worker do MapLibre emitido em `.next/static/media`                 |
+| `supabase db lint`     | nenhum erro de schema                                                  |
+| Security Advisors      | 17 avisos revisados (16 RPCs intencionais + HIBP), nenhum erro/crítico |
+
+Integração: **68/68** com Supabase real — 59 anteriores + 9 de rastreamento
+(`tests/integration/tracking.test.ts`). Os 9 cobrem envio autorizado e leitura pelo cliente, bloqueio
+de outro entregador/loja/anon, coleta obrigatória, coordenadas/precisão/horário inválidos sem
+alterar a última posição, amostra fora de ordem, rate limit de 5 s, conclusão com remoção, revogação
+por reatribuição, isolamento entre lojas, token inválido, leitura direta da tabela privada negada e
+remoção de vínculo do entregador.
+
+Unitários de rastreamento (`tests/unit/tracking.test.ts`, 19 testes): faixas de coordenadas,
+distância, validação de precisão, throttle (primeira amostra, inválida, imprecisa, cedo demais,
+movimento, deriva, heartbeat, intervalo), estados do mapa e schema Zod.
+
+E2E de rastreamento (`tests/e2e/tracking.spec.ts`), 2 testes em Chromium:
+
+1. **Fluxo de 13 passos:** cliente cria pedido; loja aceita, prepara e deixa pronto; loja atribui;
+   entregador entra em viewport mobile e inicia a coleta; autoriza o GPS (simulado pelo navegador);
+   inicia o compartilhamento; a posição chega ao banco; o cliente abre o link com token e vê o mapa
+   com marcador e tiles do OpenFreeMap; uma segunda posição atualiza o marcador sem recarregar a
+   página; o entregador conclui a entrega; o envio para e novas chamadas retornam
+   `delivery_completed`; o cliente vê o aviso de encerramento e não recebe mais posição; a Loja B não
+   acessa o pedido nem a posição.
+2. **Permissão negada:** sem permissão de GPS, o entregador vê "Permissão negada" e a orientação
+   para autorizar; ainda conclui a entrega normalmente.
+
+### Segurança, isolamento e revogação verificados no banco real
+
+- **Tabela privada:** `private.delivery_locations` não é exposta pela Data API; `anon` e
+  `authenticated` não têm `SELECT`/`INSERT`/`UPDATE`/`DELETE`; leitura direta via
+  `client.schema("private")` falha.
+- **Autorização de escrita:** sessão obrigatória, papel `driver`, perfil ativo, vínculo com a loja,
+  posse da entrega e pedido `out_for_delivery`; outro entregador, inclusive da mesma loja, recebe
+  `forbidden`.
+- **Validação de dados:** latitude/longitude fora de faixa, precisão fora de 0–20.000 m, horário
+  futuro acima de 1 min e horário anterior a 15 min são recusados sem alterar a posição anterior.
+- **Ordem e frequência:** amostra com `recorded_at` menor/igual é descartada (`out_of_order`); duas
+  gravações em menos de 5 s retornam `rate_limited`; a posição armazenada não é sobrescrita.
+- **Revogação e limpeza:** concluir a entrega apaga a posição, bloqueia novos envios
+  (`delivery_completed`) e faz `get_order_tracking` devolver `location: null`; reatribuir apaga a
+  posição do entregador anterior, bloqueia-o (`delivery_not_active`) e permite ao novo entregador
+  compartilhar; remover o vínculo bloqueia com `driver_not_member`.
+- **Isolamento:** a Loja B não lê a posição da Loja A; token inválido devolve `null`; a leitura do
+  entregador é restrita ao dono da entrega.
+- **Privacidade:** a posição só aparece no acompanhamento enquanto `picked_up`, sob slug + número +
+  hash do token; o link público não contém nome, telefone ou identidade do entregador.
+
+### Correções durante a homologação
+
+- **Worker do MapLibre sob Turbopack:** o MapLibre v6 deriva o worker de `import.meta.url`, que o
+  Turbopack reescreve, causando "Worker failed to load". A importação `...worker.mjs?url` passou a
+  ser tratada por uma regra `turbopack.rules` (`*.mjs` com query `?url`, `type: "asset"`) e por uma
+  declaração TypeScript para `*?url`. O worker e o estilo do OpenFreeMap passaram a responder 200 no
+  E2E, em dev e no build de produção.
+- **Token de acompanhamento no E2E:** o teste passou a usar SHA-256 de um UUID (64 hex), compatível
+  com o contrato `/^[0-9a-f]{64}$/` da aplicação.
+- **Cliente de atribuição no teste de isolamento:** a atribuição da Loja B passou a usar o cliente da
+  própria loja, e não o da Loja A.
+- Prettier aplicado aos arquivos novos/alterados; typecheck, lint, testes e build reexecutados.
+
+### Advisors de segurança
+
+Executado `supabase db advisors --linked --type security`. Resultado: **17 avisos**, nenhum erro nem
+crítico.
+
+- 2 avisos de RPCs `SECURITY DEFINER` executáveis por `anon` (`create_order` e
+  `get_order_tracking`): públicas por desenho, com validação completa.
+- 14 avisos de RPCs autenticadas, incluindo as três novas (`share_delivery_location`,
+  `get_driver_delivery_location`, `clear_delivery_location`): acesso autenticado intencional, com
+  autorização interna.
+- 1 aviso de **Leaked Password Protection desabilitada** (HIBP), configuração manual do Auth.
+
+### Limitações e pendências
+
+**Bloqueiam declarar a Etapa 5 completa, não a homologação web:**
+
+- Envio com tela bloqueada, app minimizado ou fechado: não testado em dispositivo físico e não
+  garantido pela plataforma web.
+- Sem histórico de trajeto, replay, rota, distância ou ETA.
+- Sem aplicativo nativo/híbrido para o entregador.
+- HIBP continua pendente de habilitação no dashboard.
+- Sem medição de bateria e consumo de dados em dispositivo real.
+
+### Critérios de aceite da Etapa 5
+
+- [x] As duas migrações aplicadas no projeto de homologação, sem `reset` e sem alterar histórico.
+- [x] Transmissão autorizada, revogação e encerramento automático validados na UI e no banco.
+- [x] Cliente vê a última posição no mapa e novas posições atualizam o marcador sem recarregar.
+- [x] Isolamento entre lojas, token inválido e acesso direto à tabela privada bloqueados.
+- [x] Posição apagada ao concluir, cancelar e reatribuir; sem histórico permanente.
+- [x] Suítes anteriores preservadas; unitários, integração e E2E de rastreamento aprovados.
+- [x] `supabase db lint` e advisors de segurança executados; achados revisados.
+- [ ] GPS físico em Android/iOS com tela bloqueada e em segundo plano.
+- [ ] Homologação de rastreamento contínuo nativo/híbrido.
+
+### Reprodução da Etapa 5
+
+```powershell
+npm run typecheck
+npm run lint
+npm run format:check
+npm test
+npm run test:e2e
+npm run build
+npx supabase db lint --linked
+npx supabase db advisors --linked --type security
+```
+
+Nunca aponte `SUPABASE_TEST_*` para produção: a suíte cria e remove usuários, lojas, cardápio,
+pedidos, entregadores e posições. As credenciais ficam apenas em `.env.local`.

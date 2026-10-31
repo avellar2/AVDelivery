@@ -184,8 +184,12 @@ Rota pública: `/loja/[slug]/pedido/[numero]#t=<token>`.
   Não existe consulta por ID ou por número sequencial.
 - Respostas inválidas são genéricas; a página usa `noindex` e política de referência restrita.
 - O cliente vê número, itens, totais, pagamento, endereço, status, histórico e, desde a Etapa 4, o
-  estado da entrega (`assigned`, `picked_up`, `delivered`, `canceled`) com horários. Não há GPS nem
-  identidade/telefone/posição do entregador.
+  estado da entrega (`assigned`, `picked_up`, `delivered`, `canceled`) com horários. Desde a Etapa 5,
+  quando a entrega está `picked_up` e há posição compartilhada, vê também a **última posição
+  recebida** em um mapa, com horário e estado de atualização. Continua sem nome, telefone ou
+  identidade do entregador.
+- A posição é embutida em `delivery.location` na mesma resposta; não há endpoint público novo. Ela
+  deixa de ser retornada (e é apagada) ao concluir, cancelar ou reatribuir. Ver [gps.md](gps.md).
 - Atualização automática a cada 12 s enquanto o pedido não é terminal, ao voltar para a aba e pelo
   botão "Atualizar agora".
 
@@ -254,8 +258,8 @@ Sem `SUPABASE_TEST_*`, integração e E2E são **ignorados** e não contam como 
 
 - Sem gateway de pagamento, conciliação automática, impressão térmica, cupom, desconto, troco ou
   agendamento.
-- Sem GPS, aplicativo de entregador ou atribuição de entregador nesta etapa. A atribuição e o
-  painel `/entregador` foram entregues na Etapa 4 (ver [deliveries.md](deliveries.md)); GPS segue
+- Atribuição e painel `/entregador` foram entregues na Etapa 4 e o GPS em primeiro plano na Etapa 5
+  (ver [deliveries.md](deliveries.md) e [gps.md](gps.md)); rastreamento com tela bloqueada segue
   fora de escopo.
 - Atualização por polling, não push.
 - Limitador em memória por instância; os limites de telefone no banco são a barreira compartilhada.

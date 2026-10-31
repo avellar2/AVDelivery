@@ -228,13 +228,32 @@ Detalhes de fluxo, máquina de estados, idempotência e limitações: [orders.md
 - `orders` ganhou uma política de leitura restrita ao entregador com entrega `assigned`,
   `picked_up` ou `delivered`; itens e adicionais seguem a mesma regra. Clientes e eventos de outros
   pedidos continuam invisíveis.
-- O acompanhamento público recebe apenas o estado da entrega e os horários; nome, telefone e
-  posição do entregador nunca são expostos.
+- O acompanhamento público recebe o estado da entrega, os horários e, desde a Etapa 5, a última
+  posição compartilhada enquanto a entrega está `picked_up`; nome, telefone e identidade do
+  entregador nunca são expostos.
 - O fluxo manual da Etapa 3 continua válido: um trigger sincroniza entregas quando a loja cancela
   ou conclui o pedido diretamente.
 
-Sem GPS, mapa, rota ou aplicativo nativo nesta etapa. Pontos de integração futura estão descritos
-em [deliveries.md](deliveries.md).
+## Rastreamento GPS
+
+- `src/modules/tracking` concentra constantes, validação, throttle, estados do mapa, Server Actions
+  e o hook `useLocationSharing`. O componente `LocationSharing` fica no painel `/entregador` e o
+  `DeliveryMap` no acompanhamento público.
+- O navegador usa `watchPosition` somente após clique explícito. As amostras passam por uma Server
+  Action autenticada e chegam à RPC `share_delivery_location`; não há cliente Supabase privilegiado
+  no browser.
+- A posição é única por entrega (`private.delivery_locations`) e não há histórico. O trigger de
+  fechamento apaga a linha ao concluir ou cancelar; reatribuir invalida a escrita imediatamente.
+- O cliente recebe a posição embutida em `get_order_tracking`, sob o mesmo token do acompanhamento.
+  O mapa usa MapLibre GL JS com estilo OpenFreeMap e marcador sem dados pessoais; sem rota,
+  distância ou ETA.
+- Atualização por polling de 12 s (`router.refresh` no acompanhamento). Não há Realtime nem canais
+  públicos com coordenadas.
+- **Homologação parcial:** o fluxo web em primeiro plano foi validado com Supabase real e E2E com
+  GPS simulado. Envio com tela bloqueada ou app em segundo plano **não** foi homologado — depende de
+  dispositivo físico e, para garantia real, de app nativo/híbrido.
+
+Detalhes: [gps.md](gps.md). Custos: [gps-costs.md](gps-costs.md).
 
 ## Decisões técnicas
 
@@ -312,3 +331,9 @@ integração) e 13 E2E. Ver [orders.md](orders.md).
 integração) e 14 E2E, incluindo o fluxo completo de entrega em mobile, reatribuição com revogação de
 acesso, concorrência e isolamento entre lojas. Ver [deliveries.md](deliveries.md) e
 [homologation.md](homologation.md).
+
+**Etapa 5 com homologação parcial em 2026-10-31**: 14 migrações aplicadas sem `reset`, 207 testes
+Vitest (68 de integração) e 16 E2E, incluindo o fluxo de rastreamento em 13 passos com GPS simulado,
+revogação, limpeza e isolamento entre lojas. O GPS web em primeiro plano está homologado; o envio com
+tela bloqueada/app em segundo plano permanece pendente por falta de dispositivo físico. Ver
+[gps.md](gps.md) e [homologation.md](homologation.md).

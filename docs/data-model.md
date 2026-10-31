@@ -386,6 +386,38 @@ Histórico append-only das transições de entrega.
 - `private.guard_delivery_event_insert` exige que o evento corresponda à entrega informada.
 - Exclusão restrita ao `service_role`, usada somente em fixtures.
 
+### `private.delivery_locations`
+
+Última posição compartilhada de uma entrega ativa. Uma linha por entrega, sem histórico.
+
+| Coluna            | Tipo               | Regras                                                        |
+| ----------------- | ------------------ | ------------------------------------------------------------- |
+| `delivery_id`     | `uuid`             | PK; FK composta `(store_id, delivery_id)` `on delete cascade` |
+| `store_id`        | `uuid`             | `not null`; FK `stores(id)` `on delete restrict`              |
+| `latitude`        | `double precision` | `not null`, `-90..90`                                         |
+| `longitude`       | `double precision` | `not null`, `-180..180`                                       |
+| `accuracy_meters` | `double precision` | `not null`, `> 0` e `<= 20000`                                |
+| `recorded_at`     | `timestamptz`      | `not null`; horário do dispositivo                            |
+| `received_at`     | `timestamptz`      | `not null default now()`; horário do servidor                 |
+| `updated_at`      | `timestamptz`      | `not null default now()`; trigger `set_updated_at`            |
+
+- `delivery_locations_recorded_at_window` exige `recorded_at` entre 15 minutos antes e 1 minuto
+  depois de `received_at`.
+- A tabela fica no schema `private`, **não exposto** pela Data API: RLS habilitado sem políticas e
+  sem grants para `anon`/`authenticated`. Somente `service_role` acessa diretamente (fixtures).
+- O trigger `private.clear_delivery_location_on_close` apaga a linha quando a entrega passa para
+  `delivered` ou `canceled`.
+- Não há `driver_profile_id`: o dono é derivável de `deliveries.driver_profile_id` e a autorização
+  é feita pela entrega.
+
+### Migrações da Etapa 5
+
+- `20261031120000_delivery_locations_schema.sql` — tabela privada, constraints, índice por loja,
+  grants restritos e trigger de limpeza.
+- `20261031120100_delivery_locations_functions.sql` — `share_delivery_location`,
+  `get_driver_delivery_location`, `clear_delivery_location` e nova versão de `get_order_tracking`
+  com `delivery.location`.
+
 ### Migrações da Etapa 4
 
 - `20261030120000_deliveries_schema.sql` — enum `delivery_status`, `driver_profiles`, `deliveries`,
@@ -440,42 +472,47 @@ Histórico append-only das transições de entrega.
 | `deliveries_order_created_idx`                             | `deliveries`            | histórico do pedido                      |
 | `delivery_events_delivery_created_idx`                     | `delivery_events`       | histórico da entrega                     |
 | `delivery_events_order_created_idx` / `_store_created_idx` | `delivery_events`       | histórico por pedido e por loja          |
+| `delivery_locations_store_updated_idx`                     | `delivery_locations`    | posições ativas por loja                 |
 
 ## Funções e triggers
 
-| Objeto                                      | Tipo                                           | Função                                                                                    |
-| ------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `set_updated_at()`                          | trigger                                        | atualiza `updated_at` em `profiles`, `stores`, `categories`, `products` e `option_groups` |
-| `handle_new_user()`                         | trigger `security definer`                     | cria `profiles` ao inserir em `auth.users`                                                |
-| `private.is_platform_admin()`               | função `security definer`                      | testa o vínculo do usuário atual em `platform_admins`                                     |
-| `private.is_store_member(uuid)`             | função `security definer`                      | testa vínculo do usuário atual com a loja                                                 |
-| `private.has_store_role(uuid, role[])`      | função `security definer`                      | testa vínculo com um dos papéis                                                           |
-| `private.prevent_store_id_change()`         | trigger                                        | impede alterar `store_id` nas tabelas do cardápio                                         |
-| `private.storage_store_id(text)`            | função `stable`                                | extrai o `store_id` do caminho do Storage                                                 |
-| `prevent_membership_identity_change()`      | trigger                                        | impede alterar `store_id`/`user_id`                                                       |
-| `ensure_store_has_owner()`                  | constraint trigger diferido `security definer` | impede remover o último `owner` de uma loja existente                                     |
-| `protect_store_active_flag()`               | trigger                                        | apenas `owner` (ou admin) altera `active`                                                 |
-| `private.guard_order_update()`              | trigger                                        | congela dados comerciais do pedido; só status/pagamento mudam                             |
-| `private.guard_order_child_insert()`        | trigger                                        | impede item com `store_id` diferente do pedido                                            |
-| `private.guard_order_event_insert()`        | trigger                                        | impede evento com `store_id` diferente do pedido                                          |
-| `public.create_order(...)`                  | RPC `security definer`                         | checkout transacional: valida, recalcula preços, grava cliente/pedido/itens/evento        |
-| `public.get_order_tracking(...)`            | RPC `security definer stable`                  | consulta pública por slug + número + hash do token                                        |
-| `public.update_order_status(...)`           | RPC `security definer`                         | valida papel, transição e concorrência; grava evento                                      |
-| `public.update_order_payment_status(...)`   | RPC `security definer`                         | altera somente o pagamento, com transições próprias                                       |
-| `private.guard_driver_profile_update()`     | trigger                                        | congela identidade do perfil (`id`, loja, usuário, criação)                               |
-| `private.guard_driver_profile_membership()` | trigger `security definer`                     | exige vínculo `driver` na mesma loja                                                      |
-| `private.guard_driver_membership_role()`    | trigger `security definer`                     | impede trocar papel de quem tem perfil de entregador                                      |
-| `private.guard_delivery_update()`           | trigger                                        | congela pedido/entregador/autor/data da entrega                                           |
-| `private.guard_delivery_event_insert()`     | trigger `security definer`                     | exige evento coerente com a entrega                                                       |
-| `private.guard_delivery_event_update()`     | trigger                                        | recusa qualquer alteração no histórico                                                    |
-| `private.sync_delivery_from_order_status()` | trigger `security definer`                     | sincroniza entregas quando o pedido é cancelado/entregue manualmente                      |
-| `public.create_driver(...)`                 | RPC `security definer`                         | cria vínculo `driver` + perfil do entregador na mesma transação                           |
-| `public.update_driver(...)`                 | RPC `security definer`                         | edita nome/telefone e ativa/desativa; bloqueia desativação com entregas ativas            |
-| `public.assign_delivery(...)`               | RPC `security definer`                         | atribui entregador ativo da loja a pedido de entrega; idempotente para o mesmo entregador |
-| `public.reassign_delivery(...)`             | RPC `security definer`                         | encerra a entrega atual e cria outra com motivo e eventos                                 |
-| `public.start_delivery(...)`                | RPC `security definer`                         | `assigned → picked_up` e `ready → out_for_delivery` na mesma transação                    |
-| `public.complete_delivery(...)`             | RPC `security definer`                         | `picked_up → delivered` e `out_for_delivery → delivered`                                  |
-| `public.cancel_delivery(...)`               | RPC `security definer`                         | cancela atribuição antes da coleta                                                        |
+| Objeto                                       | Tipo                                           | Função                                                                                    |
+| -------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `set_updated_at()`                           | trigger                                        | atualiza `updated_at` em `profiles`, `stores`, `categories`, `products` e `option_groups` |
+| `handle_new_user()`                          | trigger `security definer`                     | cria `profiles` ao inserir em `auth.users`                                                |
+| `private.is_platform_admin()`                | função `security definer`                      | testa o vínculo do usuário atual em `platform_admins`                                     |
+| `private.is_store_member(uuid)`              | função `security definer`                      | testa vínculo do usuário atual com a loja                                                 |
+| `private.has_store_role(uuid, role[])`       | função `security definer`                      | testa vínculo com um dos papéis                                                           |
+| `private.prevent_store_id_change()`          | trigger                                        | impede alterar `store_id` nas tabelas do cardápio                                         |
+| `private.storage_store_id(text)`             | função `stable`                                | extrai o `store_id` do caminho do Storage                                                 |
+| `prevent_membership_identity_change()`       | trigger                                        | impede alterar `store_id`/`user_id`                                                       |
+| `ensure_store_has_owner()`                   | constraint trigger diferido `security definer` | impede remover o último `owner` de uma loja existente                                     |
+| `protect_store_active_flag()`                | trigger                                        | apenas `owner` (ou admin) altera `active`                                                 |
+| `private.guard_order_update()`               | trigger                                        | congela dados comerciais do pedido; só status/pagamento mudam                             |
+| `private.guard_order_child_insert()`         | trigger                                        | impede item com `store_id` diferente do pedido                                            |
+| `private.guard_order_event_insert()`         | trigger                                        | impede evento com `store_id` diferente do pedido                                          |
+| `public.create_order(...)`                   | RPC `security definer`                         | checkout transacional: valida, recalcula preços, grava cliente/pedido/itens/evento        |
+| `public.get_order_tracking(...)`             | RPC `security definer stable`                  | consulta pública por slug + número + hash do token                                        |
+| `public.update_order_status(...)`            | RPC `security definer`                         | valida papel, transição e concorrência; grava evento                                      |
+| `public.update_order_payment_status(...)`    | RPC `security definer`                         | altera somente o pagamento, com transições próprias                                       |
+| `private.guard_driver_profile_update()`      | trigger                                        | congela identidade do perfil (`id`, loja, usuário, criação)                               |
+| `private.guard_driver_profile_membership()`  | trigger `security definer`                     | exige vínculo `driver` na mesma loja                                                      |
+| `private.guard_driver_membership_role()`     | trigger `security definer`                     | impede trocar papel de quem tem perfil de entregador                                      |
+| `private.guard_delivery_update()`            | trigger                                        | congela pedido/entregador/autor/data da entrega                                           |
+| `private.guard_delivery_event_insert()`      | trigger `security definer`                     | exige evento coerente com a entrega                                                       |
+| `private.guard_delivery_event_update()`      | trigger                                        | recusa qualquer alteração no histórico                                                    |
+| `private.sync_delivery_from_order_status()`  | trigger `security definer`                     | sincroniza entregas quando o pedido é cancelado/entregue manualmente                      |
+| `public.create_driver(...)`                  | RPC `security definer`                         | cria vínculo `driver` + perfil do entregador na mesma transação                           |
+| `public.update_driver(...)`                  | RPC `security definer`                         | edita nome/telefone e ativa/desativa; bloqueia desativação com entregas ativas            |
+| `public.assign_delivery(...)`                | RPC `security definer`                         | atribui entregador ativo da loja a pedido de entrega; idempotente para o mesmo entregador |
+| `public.reassign_delivery(...)`              | RPC `security definer`                         | encerra a entrega atual e cria outra com motivo e eventos                                 |
+| `public.start_delivery(...)`                 | RPC `security definer`                         | `assigned → picked_up` e `ready → out_for_delivery` na mesma transação                    |
+| `public.complete_delivery(...)`              | RPC `security definer`                         | `picked_up → delivered` e `out_for_delivery → delivered`                                  |
+| `public.cancel_delivery(...)`                | RPC `security definer`                         | cancela atribuição antes da coleta                                                        |
+| `private.clear_delivery_location_on_close()` | trigger `security definer`                     | apaga a posição quando a entrega é concluída ou cancelada                                 |
+| `public.share_delivery_location(...)`        | RPC `security definer`                         | valida entregador, vínculo, pedido, coordenadas, precisão e horário; grava a posição      |
+| `public.get_driver_delivery_location(...)`   | RPC `security definer stable`                  | devolve a posição somente ao entregador dono da entrega                                   |
+| `public.clear_delivery_location(...)`        | RPC `security definer`                         | remove a posição ao parar o compartilhamento                                              |
 
 As três funções de autorização ficam no schema **`private`**, não exposto pela Data API. A migração
 `20261029120000_move_security_helpers_to_private.sql` moveu as funções e atualizou políticas e
@@ -515,6 +552,7 @@ O disparo interno de triggers não depende desse privilégio.
 | `driver_profiles`       | —        | `select` (owner/manager/employee, admin ou o próprio usuário)                         |
 | `deliveries`            | —        | `select` (owner/manager/employee, admin ou entregador dono e ativo)                   |
 | `delivery_events`       | —        | `select` (owner/manager/employee, admin ou entregador dono e ativo)                   |
+| `delivery_locations`    | —        | — (schema `private`; sem acesso pela Data API)                                        |
 
 Nas tabelas do cardápio, as políticas de escrita exigem `owner`/`manager` (ou
 `platform_admin`); `employee` e `driver` têm somente leitura. `store_id` não está nos grants de

@@ -1,12 +1,14 @@
 # Entregas
 
-Documento da Etapa 4: cadastro de entregadores, atribuição manual, operação pelo celular — sem GPS
-nem aplicativo nativo — e reflexo no acompanhamento público.
+Documento das Etapas 4 e 5: cadastro de entregadores, atribuição manual, operação pelo celular,
+rastreamento GPS em primeiro plano e reflexo no acompanhamento público.
 
-> **Estado:** implementada e **homologada em 2026-10-30** contra o projeto Supabase exclusivo de
-> testes: 3 migrações aplicadas sem `reset`, 179 testes Vitest aprovados (59 de integração real) e
-> 14 E2E aprovados, incluindo o fluxo completo de 12 passos de entrega. Resultados, correções e
-> pendências não bloqueantes em [homologation.md](homologation.md).
+> **Estado:** Etapa 4 homologada em 2026-10-30 e Etapa 5 com homologação parcial em 2026-10-31,
+> contra o projeto Supabase exclusivo de testes: 14 migrações aplicadas sem `reset`, 207 testes
+> Vitest aprovados (68 de integração real) e 16 E2E aprovados, incluindo os fluxos completos de 12
+> passos de entrega e de 13 passos de rastreamento. O GPS web em primeiro plano está homologado; o
+> envio com tela bloqueada/segundo plano permanece pendente. Resultados, correções e pendências não
+> bloqueantes em [homologation.md](homologation.md).
 
 ## Princípios
 
@@ -212,33 +214,56 @@ grant de escrita para `anon` ou `authenticated`; toda mutação passa pelas RPCs
 `get_order_tracking` passou a devolver, além do pedido, um objeto `delivery` somente de leitura:
 
 ```json
-{ "status": "picked_up", "assignedAt": "...", "pickedUpAt": "...", "deliveredAt": null }
+{
+  "status": "picked_up",
+  "assignedAt": "...",
+  "pickedUpAt": "...",
+  "deliveredAt": null,
+  "location": {
+    "latitude": -23.55052,
+    "longitude": -46.633308,
+    "accuracyMeters": 12,
+    "recordedAt": "...",
+    "updatedAt": "..."
+  }
+}
 ```
 
 - Mensagens por estado: "Um entregador foi designado...", "O pedido foi coletado e está a caminho
   do seu endereço.", "Entrega concluída no endereço informado."
-- **Não** inclui nome, telefone, foto, placa ou posição do entregador.
-- O contrato continua exigindo slug + número + hash SHA-256 do token; nenhuma consulta por ID.
+- **Não** inclui nome, telefone, foto, placa ou identidade do entregador.
+- `location` só vem preenchido quando a entrega está `picked_up` e há posição recebida; nos demais
+  estados é `null`.
 - A entrega mais recente do pedido é a exibida (histórico de reatribuição não vaza para o cliente).
+- O contrato continua exigindo slug + número + hash SHA-256 do token; nenhuma consulta por ID.
 
-## GPS e aplicativo — pontos de integração futura (não implementados)
+## GPS da entrega (Etapa 5)
 
-A Etapa 4 deliberadamente não implementa rastreamento contínuo. Caso a Etapa 5+ evolua para isso:
+Quando o entregador toca em "Compartilhar localização", o painel `/entregador` inicia
+`watchPosition` e envia amostras por Server Action autenticada. O cliente vê a última posição
+recebida no acompanhamento público, em um mapa MapLibre GL JS com tiles do OpenFreeMap.
 
-- **Localização**: criar `delivery_locations` (ou tabela particionada) com `store_id`,
-  `delivery_id`, `driver_profile_id`, `latitude`, `longitude`, `accuracy_m`, `captured_at`,
-  `source`; RLS de escrita apenas para o entregador dono da entrega ativa; retenção curta.
-- **Escrita**: o painel `/entregador` enviaria amostras via Server Action/route handler autenticado,
-  sem `service_role` no navegador. A posição nunca seria aceita para outro entregador.
-- **Leitura**: a loja leria pela RLS; o cliente leria somente posição aproximada e somente enquanto
-  a entrega estiver `picked_up`, via RPC baseada no mesmo token do acompanhamento.
-- **Opt-in e LGPD**: consentimento explícito, janela limitada ao turno, exclusão após entrega e
-  documentação de finalidade.
-- **Tempo real**: exigiria canal autenticado (Broadcast privado com token curto) ou polling; hoje a
-  atualização é periódica.
-- **Aplicativo nativo**: fora de escopo; o `/entregador` é web mobile-first.
+- **Escrita:** RPC `share_delivery_location`, que valida sessão, papel `driver`, vínculo com a loja,
+  posse da entrega, pedido `out_for_delivery`, coordenadas, precisão e horário. A identidade vem de
+  `auth.uid()`, nunca do navegador.
+- **Leitura do entregador:** `get_driver_delivery_location`, restrita ao dono da entrega.
+- **Leitura do cliente:** embutida em `get_order_tracking`, sob o mesmo token do acompanhamento.
+- **Retenção:** uma única linha em `private.delivery_locations` por entrega, apagada ao concluir,
+  cancelar, reatribuir ou parar o compartilhamento.
+- **Frequência:** envio a cada 8 s em movimento, 20 s com deriva pequena, heartbeat de 60 s; o
+  servidor recusa gravações em menos de 5 s.
+- **Estados na tela:** desligado, solicitando GPS, aguardando sinal, ativo, permissão negada, GPS
+  indisponível, falha no envio, encerrado. A posição fica "desatualizada" após 90 s.
+- **Sem rota, distância ou ETA:** não há serviço de roteamento validado.
+- **Segundo plano:** o compartilhamento web é de primeiro plano. Com a tela bloqueada ou a aba
+  suspensa, o navegador pode interromper o GPS; não há garantia de envio contínuo. O cliente mantém
+  a última posição recebida e vê o aviso de desatualização.
+- **Aplicativo nativo:** fora do escopo desta etapa; o caminho incremental está em
+  [gps.md](gps.md#background-e-aplicativo-nativo).
+- **Sem histórico:** não há trajeto, replay nem auditoria de deslocamento.
 
-Esses pontos são apenas documentação; nada foi criado no banco nem na aplicação.
+Detalhes de arquitetura, segurança, privacidade e limitações: [gps.md](gps.md). Custos:
+[gps-costs.md](gps-costs.md).
 
 ## Testes
 
@@ -254,12 +279,18 @@ Esses pontos são apenas documentação; nada foi criado no banco nem na aplica�
   atribuição, login mobile do entregador, início, acompanhamento do cliente, visão da loja,
   confirmação, histórico, acompanhamento final, consistência no banco, isolamento de outra loja e
   ausência de dados do entregador no link público.
+- Rastreamento (`tests/unit/tracking.test.ts`, `tests/integration/tracking.test.ts` e
+  `tests/e2e/tracking.spec.ts`): validação de coordenadas/horário, throttle, autorização por
+  entregador e loja, revogação por reatribuição/conclusão, mapa no acompanhamento e fluxo mobile com
+  GPS simulado. Detalhes em [gps.md](gps.md#testes).
 
 Sem `SUPABASE_TEST_*`, integração e E2E são **ignorados** e não contam como aprovados.
 
 ## Limitações desta etapa
 
-- Sem GPS, rastreamento em tempo real, mapa, rota ou cálculo de distância.
+- O GPS web funciona em primeiro plano; não há garantia de envio com tela bloqueada ou aplicativo em
+  segundo plano. Rastreamento nativo contínuo permanece pendente.
+- Sem histórico de trajeto, rota, cálculo de distância ou ETA.
 - Sem aplicativo nativo, PWA/offline, push ou notificação por SMS/WhatsApp para o entregador.
 - Atribuição manual; sem despacho automático por proximidade ou fila.
 - Sem comprovante de entrega com foto/assinatura; a confirmação é um clique com diálogo.
