@@ -2,7 +2,8 @@
 
 > Documento de modelagem. Os valores marcados como **estimados** são projeções a partir de preços
 > públicos e das regras de throttle implementadas; os marcados como **medidos** vêm de execuções
-> reais desta etapa. Não há tráfego de produção: a Etapa 5 foi homologada em projeto de testes.
+> reais de homologação. Não há tráfego de produção: a Etapa 5 foi homologada parcialmente em projeto
+> de testes, e a Etapa 5B foi exercitada apenas em emulador.
 
 ## Premissas
 
