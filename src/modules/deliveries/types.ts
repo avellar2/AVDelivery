@@ -1,4 +1,5 @@
 import type { DeliveryStatus } from "@/types/database";
+import type { TrackingLocation } from "@/modules/tracking/types";
 import type { OrderSummary } from "@/modules/orders/types";
 
 export type DeliverySummary = {
@@ -52,4 +53,5 @@ export type TrackingDelivery = {
   assignedAt: string | null;
   pickedUpAt: string | null;
   deliveredAt: string | null;
+  location: TrackingLocation | null;
 };

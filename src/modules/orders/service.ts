@@ -19,6 +19,7 @@ import type {
 } from "@/modules/orders/types";
 import type { DeliverySummary, TrackingDelivery } from "@/modules/deliveries/types";
 import { isDeliveryStatus } from "@/modules/deliveries/constants";
+import type { TrackingLocation } from "@/modules/tracking/types";
 import type {
   Database,
   DeliveryStatus,
@@ -283,6 +284,36 @@ function activeDeliveryOf(deliveries: DeliverySummary[]): DeliverySummary | null
   );
 }
 
+function mapTrackingLocation(value: unknown): TrackingLocation | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const latitude = Number(record.latitude);
+  const longitude = Number(record.longitude);
+  const accuracyMeters = Number(record.accuracyMeters);
+  const recordedAt = typeof record.recordedAt === "string" ? record.recordedAt : null;
+  const updatedAt = typeof record.updatedAt === "string" ? record.updatedAt : null;
+
+  if (
+    !Number.isFinite(latitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    !Number.isFinite(longitude) ||
+    longitude < -180 ||
+    longitude > 180 ||
+    !Number.isFinite(accuracyMeters) ||
+    accuracyMeters <= 0 ||
+    !recordedAt ||
+    !updatedAt
+  ) {
+    return null;
+  }
+
+  return { latitude, longitude, accuracyMeters, recordedAt, updatedAt };
+}
+
 function mapTrackingDelivery(value: unknown): TrackingDelivery | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -299,6 +330,7 @@ function mapTrackingDelivery(value: unknown): TrackingDelivery | null {
     assignedAt: typeof record.assignedAt === "string" ? record.assignedAt : null,
     pickedUpAt: typeof record.pickedUpAt === "string" ? record.pickedUpAt : null,
     deliveredAt: typeof record.deliveredAt === "string" ? record.deliveredAt : null,
+    location: mapTrackingLocation(record.location),
   };
 }
 

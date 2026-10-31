@@ -24,3 +24,13 @@ body {
   background-color: #fed7aa;
   color: #431407;
 }
+
+/* Driver marker injected by MapLibre; colors follow the product palette. */
+.avd-driver-marker {
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background-color: #ea580c;
+  border: 3px solid #ffffff;
+  box-shadow: 0 0 0 6px rgb(234 88 12 / 25%);
+}

@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -19,8 +20,21 @@ import {
 import { readTrackingToken } from "@/modules/orders/cart";
 import { getOrderTrackingAction } from "@/modules/orders/actions";
 import { isTerminalStatus } from "@/modules/orders/status";
+import { DELIVERY_MAP_STATE_LABELS, getDeliveryMapState } from "@/modules/tracking/status";
 import type { TrackingOrder } from "@/modules/orders/types";
 import type { OrderStatus } from "@/types/database";
+
+const DeliveryMap = dynamic(
+  () => import("@/components/storefront/delivery-map").then((module) => module.DeliveryMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-60 w-full items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50">
+        <p className="text-xs text-zinc-500">Carregando mapa...</p>
+      </div>
+    ),
+  },
+);
 
 const DELIVERY_FLOW: OrderStatus[] = [
   "pending",
@@ -199,6 +213,12 @@ export function OrderTracking({
   const flow = order.fulfillmentType === "delivery" ? DELIVERY_FLOW : PICKUP_FLOW;
   const currentIndex = flow.indexOf(order.status);
   const canceled = order.status === "canceled";
+  const trackingLocation = order.delivery?.location ?? null;
+  const mapState = getDeliveryMapState({
+    status: order.delivery?.status ?? null,
+    hasLocation: Boolean(trackingLocation),
+    updatedAt: trackingLocation?.updatedAt ?? null,
+  });
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-5 px-4 py-8 sm:py-10">
@@ -308,6 +328,69 @@ export function OrderTracking({
               </div>
             ) : null}
           </dl>
+
+          {order.delivery.status === "picked_up" ? (
+            <div data-testid="delivery-location" className="mt-3 border-t border-zinc-100 pt-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-zinc-900">Localização do entregador</h3>
+                <Badge
+                  variant={
+                    mapState === "active" ? "success" : mapState === "waiting" ? "warning" : "muted"
+                  }
+                >
+                  {DELIVERY_MAP_STATE_LABELS[mapState]}
+                </Badge>
+              </div>
+
+              {trackingLocation ? (
+                <>
+                  <div className="mt-2">
+                    <DeliveryMap
+                      latitude={trackingLocation.latitude}
+                      longitude={trackingLocation.longitude}
+                    />
+                  </div>
+                  <p
+                    data-testid="delivery-location-updated-at"
+                    data-updated-at={trackingLocation.updatedAt}
+                    className="mt-2 text-xs text-zinc-600"
+                  >
+                    Última posição recebida às{" "}
+                    <strong className="font-semibold text-zinc-800">
+                      {formatDateTime(trackingLocation.updatedAt)}
+                    </strong>{" "}
+                    · precisão aproximada ±{Math.round(trackingLocation.accuracyMeters)} m
+                  </p>
+                  {mapState === "stale" ? (
+                    <p className="mt-1 text-xs text-amber-800">
+                      Sem atualização há mais de 90 segundos. O entregador pode estar sem sinal ou
+                      com a página em segundo plano.
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p className="mt-2 rounded-lg bg-zinc-50 px-3 py-3 text-xs leading-relaxed text-zinc-600">
+                  Aguardando o entregador compartilhar a localização. O envio depende da autorização
+                  do GPS no celular dele.
+                </p>
+              )}
+
+              <p className="mt-2 text-xs text-zinc-500">
+                Posição aproximada, visível apenas neste acompanhamento enquanto o pedido está em
+                rota. Não há rota, distância ou previsão calculada.
+              </p>
+            </div>
+          ) : null}
+
+          {order.delivery.status === "delivered" ? (
+            <p
+              data-testid="delivery-location-ended"
+              className="mt-3 border-t border-zinc-100 pt-3 text-xs text-zinc-500"
+            >
+              Entrega concluída. O compartilhamento de localização foi encerrado e a posição foi
+              removida.
+            </p>
+          ) : null}
         </section>
       ) : null}
 

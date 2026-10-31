@@ -625,6 +625,24 @@ export type Database = {
         Args: { p_delivery_id: string; p_reason: string | null };
         Returns: Json;
       };
+      share_delivery_location: {
+        Args: {
+          p_delivery_id: string;
+          p_latitude: number;
+          p_longitude: number;
+          p_accuracy_meters: number;
+          p_recorded_at: string;
+        };
+        Returns: Json;
+      };
+      get_driver_delivery_location: {
+        Args: { p_delivery_id: string };
+        Returns: Json;
+      };
+      clear_delivery_location: {
+        Args: { p_delivery_id: string };
+        Returns: Json;
+      };
     };
     Enums: {
       store_member_role: StoreMemberRole;

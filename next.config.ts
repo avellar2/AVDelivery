@@ -4,7 +4,7 @@ const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(self)" },
 ];
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
@@ -40,6 +40,10 @@ const nextConfig: NextConfig = {
       "*.css": {
         loaders: ["@tailwindcss/turbopack"],
         as: "*.css",
+      },
+      "*.mjs": {
+        condition: { query: /[?&]url(?=&|$)/ },
+        type: "asset",
       },
     },
   },

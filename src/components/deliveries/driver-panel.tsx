@@ -6,6 +6,7 @@ import { Alert } from "@/components/ui/alert";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { LocationSharing } from "@/components/deliveries/location-sharing";
 import { cn, formatCurrency, formatDateTime } from "@/lib/utils";
 import { DELIVERY_STATUS_LABELS, isActiveDeliveryStatus } from "@/modules/deliveries/constants";
 import {
@@ -56,13 +57,19 @@ function mapsUrl(delivery: DriverDelivery): string | null {
 function DeliveryCard({
   item,
   pending,
+  sharingActive,
   onStart,
   onComplete,
+  onStartSharing,
+  onStopSharing,
 }: {
   item: DriverDelivery;
   pending: boolean;
+  sharingActive: boolean;
   onStart: (id: string) => void;
   onComplete: (id: string) => void;
+  onStartSharing: (id: string) => void;
+  onStopSharing: () => void;
 }) {
   const { delivery, order } = item;
   const active = isActiveDeliveryStatus(delivery.status);
@@ -180,6 +187,15 @@ function DeliveryCard({
           </p>
         )}
       </div>
+
+      {delivery.status === "picked_up" ? (
+        <LocationSharing
+          deliveryId={delivery.id}
+          active={sharingActive}
+          onStart={() => onStartSharing(delivery.id)}
+          onStop={onStopSharing}
+        />
+      ) : null}
     </article>
   );
 }
@@ -201,6 +217,7 @@ export function DriverPanel({
   const [message, setMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [sharingDeliveryId, setSharingDeliveryId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const refresh = useCallback(
@@ -349,12 +366,16 @@ export function DriverPanel({
               key={item.delivery.id}
               item={item}
               pending={pending}
+              sharingActive={sharingDeliveryId === item.delivery.id}
               onStart={(id) => run(() => startDeliveryAction(id))}
               onComplete={(id) => {
                 if (window.confirm("Confirmar a entrega deste pedido?")) {
+                  setSharingDeliveryId((current) => (current === id ? null : current));
                   run(() => completeDeliveryAction(id));
                 }
               }}
+              onStartSharing={(id) => setSharingDeliveryId(id)}
+              onStopSharing={() => setSharingDeliveryId(null)}
             />
           ))}
         </div>
