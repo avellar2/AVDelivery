@@ -3,15 +3,17 @@
 Plataforma SaaS multiempresa de delivery para hamburguerias, pizzarias, lanchonetes e restaurantes.
 Comercialização por assinatura mensal por estabelecimento, sem comissão por pedido.
 
-**Status atual: Etapas 1, 2, 3 e 4 homologadas; Etapa 5 com homologação parcial** em projeto
-Supabase exclusivo de testes (2026-10-29 a 2026-10-31).
+**Status atual: Etapas 1, 2, 3 e 4 homologadas; Etapa 5 com homologação parcial; Etapa 5B com
+prova de conceito Android validada apenas em emulador** em projeto Supabase exclusivo de testes
+(2026-10-29 a 2026-10-31).
 
 A plataforma entrega autenticação, isolamento multiempresa por RLS, painel do estabelecimento,
 superadministrador, cardápio digital com categorias/produtos/adicionais e imagens, página pública
 mobile-first, carrinho, checkout sem login, criação transacional e idempotente de pedidos, painel de
 operação, acompanhamento por link com token, cadastro de entregadores, atribuição manual, painel
 mobile do entregador e rastreamento GPS em primeiro plano com mapa no acompanhamento do cliente.
-Rastreamento com tela bloqueada, aplicativo nativo e cobrança por assinatura ainda não fazem parte.
+Há também uma prova de conceito de aplicativo Android do entregador com serviço de localização em
+primeiro plano, ainda sem homologação em aparelho físico. Cobrança por assinatura não faz parte.
 
 > Resultados reais, correções e pendências não bloqueantes: [docs/homologation.md](docs/homologation.md).
 
@@ -23,6 +25,8 @@ Rastreamento com tela bloqueada, aplicativo nativo e cobrança por assinatura ai
 - Zod para validação e Sharp para processamento de imagens
 - Vitest (unitários/integração) e Playwright (E2E)
 - ESLint + Prettier
+- Aplicativo Android em `apps/driver-mobile`: Capacitor 8 + React 19 + Vite, serviço nativo Java
+  (requer JDK 21 e Android SDK 36 para compilar)
 
 ## Pré-requisitos
 
@@ -274,9 +278,13 @@ Detalhes: [docs/orders.md](docs/orders.md).
   amostra a cada 5 s; o cliente recebe apenas a última posição, via o mesmo token do acompanhamento.
 - O GPS web funciona em primeiro plano; não há garantia de envio com tela bloqueada ou aplicativo em
   segundo plano.
-- Sem rota, distância, ETA, aplicativo nativo ou despacho automático nesta etapa.
+- `apps/driver-mobile` é a prova de conceito Android: telas em React/Capacitor e serviço nativo de
+  localização que envia por HTTPS mesmo com a WebView suspensa. Foi exercitado só em emulador, com
+  posição simulada; não substitui teste em aparelho físico.
+- Sem rota, distância, ETA ou despacho automático nesta etapa.
 
-Detalhes: [docs/deliveries.md](docs/deliveries.md) e [docs/gps.md](docs/gps.md).
+Detalhes: [docs/deliveries.md](docs/deliveries.md), [docs/gps.md](docs/gps.md) e
+[docs/gps-android.md](docs/gps-android.md).
 
 ## Testes
 
@@ -432,6 +440,7 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - [Pedidos](docs/orders.md)
 - [Entregas](docs/deliveries.md)
 - [Rastreamento GPS](docs/gps.md)
+- [Aplicativo Android do entregador](docs/gps-android.md)
 - [Custos do GPS](docs/gps-costs.md)
 - [Homologação](docs/homologation.md)
 - [Roadmap](docs/roadmap.md)
@@ -452,8 +461,10 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - Sem gateway de pagamento, cobrança automática, conciliação, impressão térmica, cupom ou desconto.
 - Pix é manual e nunca é marcado como pago automaticamente.
 - GPS web apenas em primeiro plano: com tela bloqueada ou navegador em segundo plano, o envio pode
-  parar; não há homologação em dispositivo físico nem rastreamento contínuo nativo.
-- Sem histórico de trajeto, rota, distância ou ETA; sem aplicativo nativo do entregador.
+  parar. O app Android (Etapa 5B) mitiga isso com serviço nativo, mas foi validado apenas em
+  emulador; não há homologação em dispositivo físico nem em iOS.
+- Sem histórico de trajeto, rota, distância ou ETA. Aplicativo Android é prova de conceito, sem
+  publicação em loja; não há app iOS.
 - Atribuição de entregador manual; sem despacho automático, comprovante com foto/assinatura ou
   repasse financeiro. O cadastro exige conta existente (sem convite por e-mail).
 - Atualização de pedidos e entregas por polling (15 s no painel, 12 s no acompanhamento), não por
@@ -468,13 +479,15 @@ Detalhes completos em [docs/security.md](docs/security.md).
   SMTP para produção.
 - Rotação de token após a expiração de 1h não simulada; persistência de sessão em reload verificada.
 - **Etapa 5 com homologação parcial em 2026-10-31** no projeto de testes: GPS web em primeiro plano
-  validado; tela bloqueada/segundo plano pendente de dispositivo físico e app nativo. Os itens de
-  lançamento comercial (gateway de pagamento, push, rate limit distribuído, paginação, aplicativo
-  nativo, impressão, cupons, agendamento, notificações e repasse ao entregador) continuam pendentes.
+  validado; tela bloqueada/segundo plano pendente de dispositivo físico e app nativo. A Etapa 5B
+  entregou o app Android apenas como prova de conceito em emulador, sem homologação de segundo
+  plano. Os itens de lançamento comercial (gateway de pagamento, push, rate limit distribuído,
+  paginação, publicação do aplicativo, impressão, cupons, agendamento, notificações e repasse ao
+  entregador) continuam pendentes.
 
 ## Próxima etapa recomendada
 
 As Etapas 1 a 4 estão homologadas e a Etapa 5 tem homologação web parcial. A Etapa 6 — Assinatura e
 cobrança, conforme [docs/roadmap.md](docs/roadmap.md), permanece como próximo escopo e não foi
-iniciada. Antes de retomar rastreamento, recomenda-se validar GPS físico em Android/iOS e decidir
-sobre o app nativo/híbrido do entregador.
+iniciada. Antes de retomar rastreamento, recomenda-se validar o app Android em aparelho físico e
+decidir sobre iOS.

@@ -17,6 +17,13 @@
 | Tiles por sessão de mapa                 | ~1,2 MB            | carregamento inicial + pequenos deslocamentos      |
 | Retenção de posição                      | 0 (após conclusão) | uma linha por entrega ativa; apagada no fechamento |
 
+Duas ressalvas importantes sobre a conta:
+
+- O tráfego do **basemap** (mapa) não passa pelo Supabase. Ele sai do OpenFreeMap (ou de um provedor
+  de tiles/CDN contratado à parte) e **não consome** a franquia de egress do Supabase.
+- O egress do Supabase é cobrado por saída **não cacheada**; respostas servidas pelo cache/CDN têm
+  preço menor. A franquia de 250 GB do Pro considera o egress não cacheado.
+
 Fórmulas:
 
 ```text
@@ -71,11 +78,24 @@ concluir.
   baixos; projeto pode ser pausado por inatividade.
 - **Pro:** US$ 25/mês, inclui 8 GB de banco, 250 GB de egress, 100 GB de storage e 100 mil MAU.
   Excedente de egress: US$ 0,09/GB (US$ 0,03/GB em cache). Excedente de banco: US$ 0,125/GB.
-- O consumo de GPS em todos os cenários cabe no egress incluído no Pro (máximo estimado: 27 GB).
-- O limite real é **compute**: 27 milhões de gravações/mês (~10/s em média, com picos) mais as
-  leituras de acompanhamento. A instância incluída no Pro pode não sustentar o pico de 500 lojas;
-  pode ser necessário subir um degrau de compute. Faixa estimada: US$ 25–75/mês no total,
+- Os 250 GB cobrem somente egress do próprio Supabase (Auth, PostgREST, Storage, Realtime). O
+  basemap do mapa **não entra nessa franquia**; os 540 GB do cenário de 500 lojas são tráfego do
+  OpenFreeMap, não do Supabase.
+- O consumo de GPS do Supabase em todos os cenários cabe na franquia Pro: no máximo ~27 GB/mês de
+  respostas de acompanhamento (500 lojas × 30 entregas × 30 consultas × 2 KB). Mesmo com folga de
+  2× na frequência de polling, o valor (~54 GB) permanece abaixo de 250 GB.
+- A conta do Supabase só passaria da franquia se o produto adicionasse consultas pesadas por todo o
+  catálogo, uploads de imagem ou uso massivo de Storage; isso não vem do GPS.
+- O limite prático do GPS é **compute**: 27 milhões de gravações/mês (~10/s em média, com picos)
+  mais as leituras de acompanhamento. A instância incluída no Pro pode não sustentar o pico de 500
+  lojas; pode ser necessário subir um degrau de compute. Faixa estimada: US$ 25–75/mês no total,
   dependendo do cenário e do pico real.
+- Conexões também contam: cada dispositivo e cada cliente abrem conexões via PostgREST/Auth. Em
+  pico, o Pro tem limite de conexões diretas e de pooler; o app usa requisições curtas (sem Realtime)
+  e não mantém conexão aberta entre envios, o que reduz a pressão.
+- O custo acima é **só do Supabase**. Não inclui hospedagem do site Next.js, domínio, e-mail
+  transacional, observabilidade, suporte nem tributos — ver a seção "Custos fora do Supabase".
+- Valores de 2026, sujeitos a reajuste do provedor e a câmbio.
 
 ### OpenFreeMap
 
@@ -110,17 +130,46 @@ Premissa: R$ 59,90 por loja/mês.
   consome parte relevante da receita de uma única loja, mas 10 lojas pagam o Pro com folga.
 - Se o preço de R$ 59,90 for por **uso ilimitado da plataforma** (não por loja), a conclusão muda:
   seria necessário revisar o plano antes de 50 lojas. O modelo acima assume cobrança por loja.
+- A tabela cobre apenas a infraestrutura descrita. Não inclui hospedagem do site, domínio, e-mail,
+  observabilidade, suporte, tributos nem a distribuição do aplicativo Android.
+
+## Custos fora do Supabase
+
+| Item                                           | Faixa estimada (US$/mês) | Observação                                                                                       |
+| ---------------------------------------------- | -----------------------: | ------------------------------------------------------------------------------------------------ |
+| Hospedagem do Next.js (Vercel/equivalente)     |                     0–40 | Hobby cobre demonstração; Pro quando houver mais de uma loja pagante e uso comercial             |
+| Domínio e DNS                                  |                     ~1–2 | Anual diluído                                                                                    |
+| E-mail transacional (confirmação, recuperação) |                     0–20 | Depende do volume; hoje o cadastro público está desabilitado no homolog                          |
+| Observabilidade (logs, erros, uptime)          |                     0–30 | Sem isso não há como medir picos reais nem responder incidentes                                  |
+| Basemap em escala (se sair do OpenFreeMap)     |                    20–60 | VPS + CDN ou provedor comercial; necessário sobretudo acima de ~50 lojas com mapa em uso intenso |
+| Publicação Android (Play Store)                |              ~25 uma vez | Taxa única de cadastro de desenvolvedor; não inclui eventuais serviços de revisão                |
+| Suporte / horas de operação                    |                 variável | Não modelado; cresce com o número de lojas                                                       |
+| Tributos e câmbio                              |                 variável | Preços em dólar; conversão aplicada na tabela de margem (R$ 5,40)                                |
+
+Esses itens podem somar mais que o próprio Supabase em cenários pequenos. A modelagem de margem
+acima é otimista porque considera só a infraestrutura de dados.
 
 ## Medições desta etapa
 
-- **Produção:** 0 requisições (sem tráfego real).
-- **Integração:** 9 testes criam e encerram entregas; cada envio é uma RPC, não há laço contínuo.
-- **E2E:** uma sessão de ~15 s com GPS simulado gerou 2 gravações na primeira entrega (a primeira
-  posição e a atualização após deslocamento), mais leituras de acompanhamento do teste.
-- **Não medido:** bateria, consumo de dados móveis e volume real por turno de entregador. Só podem
-  ser medidos em dispositivo físico, o que ficou pendente nesta etapa.
-- **Conclusão de custo:** o desenho é barato e previsível; o risco está no basemap em escala e no
-  compute sob pico, não no armazenamento da posição.
+A distinção abaixo é deliberada: **estimativa** é projeção a partir de preços e do throttle;
+**medição** é o que foi observado em execução real de homologação.
+
+| Tipo       | Item                                          | Resultado                                                                                                                                 |
+| ---------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Medição    | Produção                                      | 0 requisições; nenhum banco de produção foi acessado                                                                                      |
+| Medição    | Integração (Vitest)                           | 9 testes criam e encerram entregas; envios pontuais por RPC, sem laço contínuo                                                            |
+| Medição    | E2E web                                       | sessão de ~15 s com GPS simulado gerou 2 gravações (posição inicial + deslocamento)                                                       |
+| Medição    | App Android em emulador                       | movimento simulado gerou 1 gravação a cada ~12 s; 5 amostras ficaram 61 s em fila offline e foram enviadas depois, com o horário original |
+| Medição    | App Android em emulador — tela bloqueada      | 7 gravações em ~73 s com o serviço em primeiro plano                                                                                      |
+| Estimativa | Amostras por entrega                          | 60 (throttle de 8–60 s)                                                                                                                   |
+| Estimativa | Egress Supabase por mês                       | 0,54–27 GB nos cenários de 10–500 lojas                                                                                                   |
+| Estimativa | Egress de basemap por mês                     | 10,8–540 GB (OpenFreeMap, fora da franquia Supabase)                                                                                      |
+| Não medido | Bateria, dados móveis e volume real por turno | Só podem ser medidos em dispositivo físico, pendente nesta etapa                                                                          |
+
+- **Conclusão de custo:** o desenho é barato e previsível do lado do Supabase; o risco está no
+  basemap em escala, no compute sob pico e nos custos fixos fora do Supabase.
+- **O que ainda falta medir:** requisições e egress reais por entrega em produção, pico simultâneo
+  de entregadores, consumo de bateria/dados do app Android e custo de suporte por loja.
 
 ## Recomendações
 

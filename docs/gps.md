@@ -2,7 +2,8 @@
 
 ## Status
 
-**Etapa 5 — homologação parcial (web) em 2026-10-31.**
+**Etapa 5 — homologação parcial (web) em 2026-10-31. Etapa 5B — prova de conceito Android em
+emulador, sem homologação de segundo plano.**
 
 - **GPS web em primeiro plano:** implementado e validado com Supabase real, testes de integração e
   E2E em Chromium com geolocalização simulada.
@@ -10,8 +11,12 @@
   dispositivo físico Android/iOS acessível durante esta etapa. O comportamento depende do navegador
   e do sistema operacional, e não é garantido por `watchPosition`. Ver
   [background e aplicativo nativo](#background-e-aplicativo-nativo).
+- **Aplicativo Android (Etapa 5B):** existe uma prova de conceito em `apps/driver-mobile` com
+  serviço em primeiro plano nativo e envio HTTPS independente da WebView. Foi exercitada apenas em
+  emulador com posição simulada; não substitui aparelho físico. Detalhes em
+  [gps-android.md](gps-android.md).
 - Nenhuma alegação de rastreamento contínuo em segundo plano deve ser feita com base apenas nos
-  testes automatizados.
+  testes automatizados ou no emulador.
 
 ## Objetivo
 
@@ -253,7 +258,12 @@ após 90 s) até o envio voltar. Isso é limitação de plataforma, não bug.
 4. Revisar política de privacidade, permissões e consumo de bateria; medir em dispositivos reais.
 5. Só então declarar homologação de segundo plano, com evidências por plataforma.
 
-Não há decisão tomada de migrar a aplicação inteira para Capacitor.
+Os passos 2 e 3 foram executados na Etapa 5B para Android: o app está em `apps/driver-mobile`, com
+serviço em primeiro plano e cliente HTTP nativo. A evidência é de **emulador**, com posição
+simulada; os passos 4 e 5 continuam pendentes de aparelho físico, e nada foi compilado para iOS.
+Ver [gps-android.md](gps-android.md).
+
+Nenhuma migração, tabela ou RPC nova foi necessária para o aplicativo.
 
 ## Testes
 

@@ -213,7 +213,9 @@ Critério de pronto: uma loja sem assinatura ativa entra em modo restrito sem pe
 
 ## Fora de escopo até nova decisão
 
-- Aplicativo nativo (iOS/Android).
-- Rastreamento GPS com tela bloqueada/segundo plano.
+- Publicação do aplicativo Android na Play Store e versão iOS (a prova de conceito existe em
+  `apps/driver-mobile`, mas não há homologação em aparelho físico).
+- Rastreamento GPS em segundo plano homologado — a implementação Android foi exercitada só em
+  emulador, com posição simulada; aparelho físico e iOS continuam pendentes.
 - Marketplace ou comissão por pedido.
 - Microsserviços, filas ou Kubernetes.

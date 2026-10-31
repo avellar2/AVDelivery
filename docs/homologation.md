@@ -11,6 +11,12 @@ aplicadas, integração, E2E e revisão visual em desktop e mobile. Na Etapa 5, 
 plano foi validado; o envio com tela bloqueada/app em segundo plano permanece pendente por falta de
 dispositivo físico. Detalhes nas seções finais.
 
+A Etapa 5B entregou uma prova de conceito de aplicativo Android (`apps/driver-mobile`) com serviço
+em primeiro plano e envio HTTP nativo. Ela foi exercitada **somente em emulador**, com posição
+simulada, e por isso **não homologa** GPS em segundo plano nem substitui teste em aparelho real.
+Não houve migração nova e nenhum banco de produção foi acessado. Ver
+[gps-android.md](gps-android.md).
+
 A Etapa 1 está detalhada abaixo; a homologação da Etapa 2 está na seção seguinte.
 
 Projeto Supabase remoto exclusivo de homologação:
@@ -679,3 +685,49 @@ npx supabase db advisors --linked --type security
 
 Nunca aponte `SUPABASE_TEST_*` para produção: a suíte cria e remove usuários, lojas, cardápio,
 pedidos, entregadores e posições. As credenciais ficam apenas em `.env.local`.
+
+## Etapa 5B — aplicativo Android do entregador
+
+**Status: prova de conceito validada em emulador; sem homologação de segundo plano.**
+
+O app está em `apps/driver-mobile` e não alterou backend, migrações, cardápio, dashboard ou
+checkout. A validação usou o mesmo projeto Supabase de homologação.
+
+### Resultados
+
+- Build web (TypeScript + Vite), `cap sync`, build Android (`assembleDebug`) e instalação no
+  emulador concluídos.
+- 30 testes Vitest do app e 22 testes JVM (21 próprios, incluindo throttle, fila e cliente HTTP, mais
+  1 de exemplo do template Capacitor) aprovados.
+- Login, seleção de loja, detalhe de entrega, início, compartilhamento, parada, conclusão e
+  reatribuição exercitados pela interface.
+- Serviço em primeiro plano confirmado (`isForeground=true`, id 4211) com notificação persistente.
+- Posições enviadas por HTTPS nativo e gravadas na RPC; movimento simulado gerou uma gravação a
+  cada ~12 s.
+- Com a tela bloqueada (`mWakefulness=Asleep`), 7 gravações em ~73 s.
+- Com outro aplicativo em primeiro plano, as gravações continuaram por ~62 s.
+- Com a rede desligada por 61 s, 5 amostras ficaram na fila e foram enviadas ao reconectar,
+  preservando o horário original.
+- Parar, concluir e reatribuir encerraram o serviço e apagaram a posição.
+
+### Limitações
+
+- Emulador Android 13 (API 33) com posição injetada por provedor de teste; `adb emu geo fix` não
+  chegou ao provedor GPS da imagem. Não é evidência de GNSS real.
+- Sem aparelho físico, Doze, otimização de bateria de fabricante, consumo de bateria/dados ou
+  reinício real.
+- iOS não foi compilado; apenas a arquitetura equivalente foi documentada.
+
+### Critérios de aceite da Etapa 5B
+
+- [x] App separado do Next.js, reutilizando as RPCs e sem duplicar regras de negócio.
+- [x] Sessão em armazenamento seguro; nenhum `service_role` ou segredo administrativo no app.
+- [x] Serviço em primeiro plano do tipo `location`, iniciado por ação explícita.
+- [x] Envio nativo independente da WebView, com fila limitada e validação de horário.
+- [x] Encerramento após conclusão, cancelamento, reatribuição, parada manual ou perda de acesso.
+- [x] Build e testes automatizados aprovados.
+- [ ] Homologação em aparelho físico Android com GNSS real, tela bloqueada prolongada e Doze.
+- [ ] Versão iOS compilada e testada em dispositivo Apple.
+
+Reprodução: ver [gps-android.md](gps-android.md). Os fixtures de teste são criados por scripts
+locais, nunca pelo aplicativo.

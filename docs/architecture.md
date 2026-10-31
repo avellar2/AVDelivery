@@ -253,7 +253,22 @@ Detalhes de fluxo, máquina de estados, idempotência e limitações: [orders.md
   GPS simulado. Envio com tela bloqueada ou app em segundo plano **não** foi homologado — depende de
   dispositivo físico e, para garantia real, de app nativo/híbrido.
 
-Detalhes: [gps.md](gps.md). Custos: [gps-costs.md](gps-costs.md).
+### Aplicativo Android do entregador (Etapa 5B)
+
+- `apps/driver-mobile` é um projeto independente (Capacitor 8 + React 19 + Vite), fora do build do
+  Next.js. Ele não duplica regras: usa as mesmas RPCs e políticas RLS do painel web.
+- As telas (login, loja, lista, detalhe e rastreamento) rodam na WebView; o **envio da posição**
+  roda em um serviço Android nativo de tipo `location`, com notificação persistente, cliente HTTP
+  próprio e fila limitada. A WebView pode ser suspensa sem interromper a coleta.
+- O app usa apenas a chave pública `anon`, guarda a sessão no armazenamento seguro do Android e
+  mantém os tokens de envio somente em memória nativa. Nenhum `service_role` ou segredo
+  administrativo é embarcado.
+- O serviço encerra ao concluir, cancelar, reatribuir, parar manualmente ou perder autorização.
+- **Não homologado em aparelho físico:** a validação foi feita em emulador Android 13 com posição
+  simulada. iOS não foi compilado neste ambiente.
+
+Detalhes: [gps-android.md](gps-android.md). GUI web: [gps.md](gps.md). Custos:
+[gps-costs.md](gps-costs.md).
 
 ## Decisões técnicas
 

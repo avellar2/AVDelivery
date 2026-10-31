@@ -2,17 +2,18 @@
 
 ## Modelo de ameaça (resumido)
 
-| Risco                                                          | Controle nesta etapa                                                 |
-| -------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Usuário da Loja A ler/alterar dados da Loja B                  | RLS por vínculo + guards de servidor + testes de integração          |
-| Escalada de papel (`employee` → `owner`, usuário → superadmin) | políticas por papel, `platform_admins` sem escrita, testes           |
-| Loja perder o último proprietário                              | constraint trigger diferido                                          |
-| Gerente desativar a loja indevidamente                         | trigger de status + regra de UI                                      |
-| Exposição de segredos no browser                               | somente `NEXT_PUBLIC_*` no cliente; `service_role` apenas em scripts |
-| Vazamento de dados privados na página pública                  | cliente anônimo sem sessão + policy `active`                         |
-| Open redirect após login                                       | `safeRedirectPath`                                                   |
-| Erro interno exposto ao usuário                                | `AppError` com mensagem pública e log apenas da mensagem             |
-| Sessão fixada / tokens no browser                              | cookies `httpOnly` do `@supabase/ssr`; auth somente server-side      |
+| Risco                                                          | Controle nesta etapa                                                           |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Usuário da Loja A ler/alterar dados da Loja B                  | RLS por vínculo + guards de servidor + testes de integração                    |
+| Escalada de papel (`employee` → `owner`, usuário → superadmin) | políticas por papel, `platform_admins` sem escrita, testes                     |
+| Loja perder o último proprietário                              | constraint trigger diferido                                                    |
+| Gerente desativar a loja indevidamente                         | trigger de status + regra de UI                                                |
+| Exposição de segredos no browser                               | somente `NEXT_PUBLIC_*` no cliente; `service_role` apenas em scripts           |
+| Vazamento de dados privados na página pública                  | cliente anônimo sem sessão + policy `active`                                   |
+| Open redirect após login                                       | `safeRedirectPath`                                                             |
+| Erro interno exposto ao usuário                                | `AppError` com mensagem pública e log apenas da mensagem                       |
+| Sessão fixada / tokens no browser                              | cookies `httpOnly` do `@supabase/ssr`; auth somente server-side                |
+| Tokens do app Android em disco ou em logs                      | armazenamento seguro do Android; token de envio só em memória nativa; sem logs |
 
 | Cliente adulterar preço/total no checkout | RPC recalcula tudo a partir do catálogo; valores do browser são ignorados |
 | Pedido duplicado por duplo clique/retentativa | chave de idempotência + hash + advisory lock + unique por loja |
@@ -515,6 +516,8 @@ endereços nunca são logados.
 - [x] Etapa 4: migrações de entregas aplicadas, RLS e grants conferidos, 14 integrações e E2E verdes.
 - [x] Etapa 5: tabela privada de localização sem acesso pela Data API; RPCs de envio/leitura
       validadas, revogação e limpeza conferidas, 9 integrações e 2 E2E verdes.
+- [x] Etapa 5B: app Android sem `service_role`, sessão em armazenamento seguro, envio nativo pelo
+      mesmo RPC e revogação encerrando o serviço — validado em emulador.
 - [ ] Validar GPS físico e comportamento com tela bloqueada em Android e iOS.
 - [x] `service_role` usada apenas em scripts e em `src/lib/supabase/admin.ts` (server-only).
 - [ ] Habilitar leaked password protection (HIBP) no dashboard.
