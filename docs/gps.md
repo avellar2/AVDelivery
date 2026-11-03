@@ -2,21 +2,24 @@
 
 ## Status
 
-**Etapa 5 — homologação parcial (web) em 2026-10-31. Etapa 5B — prova de conceito Android em
-emulador, sem homologação de segundo plano.**
+**Etapa 5 — homologação parcial (web) em 2026-10-31. Etapa 5C — validação ampliada do aplicativo
+Android em emulador, sem homologação física.**
 
 - **GPS web em primeiro plano:** implementado e validado com Supabase real, testes de integração e
   E2E em Chromium com geolocalização simulada.
-- **GPS em segundo plano (tela bloqueada / app minimizado):** **não homologado**. Não havia
-  dispositivo físico Android/iOS acessível durante esta etapa. O comportamento depende do navegador
-  e do sistema operacional, e não é garantido por `watchPosition`. Ver
+- **GPS em segundo plano (tela bloqueada / app minimizado):** **não homologado em aparelho físico**.
+  Não havia dispositivo físico Android/iOS acessível durante esta etapa. O comportamento depende do
+  navegador e do sistema operacional, e não é garantido por `watchPosition`. Ver
   [background e aplicativo nativo](#background-e-aplicativo-nativo).
-- **Aplicativo Android (Etapa 5B):** existe uma prova de conceito em `apps/driver-mobile` com
-  serviço em primeiro plano nativo e envio HTTPS independente da WebView. Foi exercitada apenas em
-  emulador com posição simulada; não substitui aparelho físico. Detalhes em
-  [gps-android.md](gps-android.md).
-- Nenhuma alegação de rastreamento contínuo em segundo plano deve ser feita com base apenas nos
-  testes automatizados ou no emulador.
+- **Aplicativo Android (Etapa 5C):** existe em `apps/driver-mobile` com serviço em primeiro plano
+  nativo e envio HTTPS independente da WebView. Foi exercitado apenas em emulador com posição
+  simulada, incluindo tela bloqueada por 30 minutos, Doze forçado, perda de rede, localização
+  desligada, economia de bateria, processo encerrado e renovação de token. A revogação de permissão
+  e o ciclo de reatribuição/conclusão/cancelamento/desativação pelo app não chegaram a ser
+  executados. Isso não substitui aparelho físico. Detalhes em [gps-android.md](gps-android.md) e
+  [android-device-validation.md](android-device-validation.md).
+- Nenhuma alegação de rastreamento contínuo em segundo plano em aparelho real deve ser feita com base
+  apenas nos testes automatizados ou no emulador.
 
 ## Objetivo
 
@@ -258,10 +261,11 @@ após 90 s) até o envio voltar. Isso é limitação de plataforma, não bug.
 4. Revisar política de privacidade, permissões e consumo de bateria; medir em dispositivos reais.
 5. Só então declarar homologação de segundo plano, com evidências por plataforma.
 
-Os passos 2 e 3 foram executados na Etapa 5B para Android: o app está em `apps/driver-mobile`, com
-serviço em primeiro plano e cliente HTTP nativo. A evidência é de **emulador**, com posição
-simulada; os passos 4 e 5 continuam pendentes de aparelho físico, e nada foi compilado para iOS.
-Ver [gps-android.md](gps-android.md).
+Os passos 2 e 3 foram executados nas Etapas 5B e 5C para Android: o app está em
+`apps/driver-mobile`, com serviço em primeiro plano e cliente HTTP nativo. A evidência é de
+**emulador**, com posição simulada; os passos 4 e 5 continuam pendentes de aparelho físico, e nada foi
+compilado para iOS. Ver [gps-android.md](gps-android.md) e
+[android-device-validation.md](android-device-validation.md).
 
 Nenhuma migração, tabela ou RPC nova foi necessária para o aplicativo.
 
@@ -290,7 +294,8 @@ Nenhuma migração, tabela ou RPC nova foi necessária para o aplicativo.
 - Sem rota, distância, ETA ou geocodificação.
 - Sem mapa no painel da loja; somente no acompanhamento do cliente.
 - Sem push/Realtime: acompanhamento por polling de 12 s.
-- Sem aplicativo nativo nesta etapa.
+- O aplicativo Android existe, mas o GPS em segundo plano ainda não foi homologado em aparelho
+  físico; a evidência é toda de emulador.
 - A precisão depende do dispositivo; em áreas urbanas densas pode haver erro de dezenas de metros.
 - O limite de 5 s no servidor é fixo nesta versão.
 - O mapa depende de tiles do OpenFreeMap; falha de rede exibe fallback textual com a última posição.

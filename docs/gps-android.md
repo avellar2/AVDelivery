@@ -2,16 +2,21 @@
 
 ## Status
 
-**Etapa 5B — prova de conceito construída e validada apenas em emulador (2026-10-31).**
+**Etapa 5C — validação ampliada em emulador, sem homologação física (2026-10-31).**
 
 - O aplicativo existe em `apps/driver-mobile`, separado do Next.js, e reutiliza as mesmas RPCs,
   tabelas e políticas do backend.
 - O rastreamento em segundo plano foi exercitado em **emulador Android 13 (API 33)** com localização
-  simulada por provedor de teste. **Não há dispositivo físico conectado.**
-- Nenhuma homologação de GPS em segundo plano é declarada. O que foi observado no emulador não
-  prova o comportamento em aparelho real, com GNSS físico, economia de bateria, Doze ou
-  personalizações de fabricante.
-- O GPS web em primeiro plano continua sendo o fluxo homologado (ver [gps.md](gps.md)).
+  simulada por provedor de teste, inclusive tela bloqueada por 30 minutos, outro app em primeiro
+  plano, Doze forçado, perda de rede, localização desligada, economia de bateria, processo encerrado
+  e renovação de token. A revogação de permissão e o ciclo de reatribuição/conclusão/cancelamento
+  durante o rastreamento não foram executados; ver as pendências em
+  [android-device-validation.md](android-device-validation.md).
+- **Não há dispositivo físico conectado.** Nenhuma homologação de GPS em aparelho real é declarada.
+  O que foi observado no emulador não prova o comportamento com GNSS físico, economia de bateria de
+  fabricante, Doze real ou personalizações de OEM.
+- O GPS web em primeiro plano continua sendo o fluxo homologado (ver [gps.md](gps.md)). Os detalhes
+  desta etapa estão em [android-device-validation.md](android-device-validation.md).
 
 ## Escolha técnica
 
@@ -62,15 +67,22 @@ traduzidos para mensagens curtas na interface.
 ## Serviço em primeiro plano
 
 - Tipo `location` (`FOREGROUND_SERVICE_LOCATION`), iniciado somente por ação explícita do
-  entregador no painel da entrega.
+  entregador no painel da entrega, com o app visível.
 - Notificação persistente no canal `avd_delivery_tracking` (id 4211), com ação **Parar**; o serviço
   usa `startForeground` com `FOREGROUND_SERVICE_TYPE_LOCATION` em Android 10+.
-- Assina `GPS_PROVIDER` (1 s) e `NETWORK_PROVIDER` (2 s), com nova tentativa a cada 15 s caso o
-  provedor não esteja disponível.
+- Assina `GPS_PROVIDER` (1 s) e `NETWORK_PROVIDER` (2 s) com um único listener reutilizado; nova
+  tentativa a cada 15 s caso nenhum provedor esteja disponível. Desligar/ligar a localização do
+  sistema altera o estado para “Localização desativada…” e retoma a coleta ao religar.
+- Um `NetworkCallback` padrão detecta a volta da rede e antecipa o envio da fila, sem esperar o
+  recuo máximo de 60 s.
 - Envio por `HttpsURLConnection` direto na RPC PostgREST. Não depende de `fetch` na WebView, de
   Service Worker nem de a página continuar ativa.
 - `START_NOT_STICKY` e checagem de intent nulo: se o processo for recriado sem sessão em memória, o
-  serviço não reinicia a coleta por conta própria.
+  serviço não reinicia a coleta por conta própria. Após `force-stop`, a interface volta ao estado
+  inicial e exige novo clique.
+- Falha ao obter o primeiro plano (`SecurityException`,
+  `ForegroundServiceStartNotAllowedException` ou tipo ausente) encerra o serviço com mensagem, em vez
+  de deixá-lo ser morto pelo sistema.
 - Encerra ao concluir, cancelar ou reatribuir a entrega, ao parar manualmente, ao sair da conta ou
   quando o backend responde erro terminal de autorização.
 
@@ -78,20 +90,22 @@ traduzidos para mensagens curtas na interface.
 
 As regras são as mesmas do cliente web e estão cobertas por testes nos dois lados:
 
-| Regra                       | Valor                                |
-| --------------------------- | ------------------------------------ |
-| Intervalo base              | 20 s                                 |
-| Em movimento                | 8 s e pelo menos 25 m desde o último |
-| Desvio mínimo sem movimento | 10 m                                 |
-| Heartbeat                   | 60 s                                 |
-| Precisão máxima aceita      | 150 m                                |
-| Fila offline                | 60 amostras / 15 min                 |
-| Novo envio no servidor      | throttle mínimo de 5 s               |
-| Timestamp aceito            | entre 15 min antes e 1 min depois    |
+| Regra                       | Valor                                        |
+| --------------------------- | -------------------------------------------- |
+| Intervalo base              | 20 s                                         |
+| Em movimento                | 8 s e pelo menos 25 m desde o último         |
+| Desvio mínimo sem movimento | 10 m                                         |
+| Heartbeat                   | 60 s                                         |
+| Precisão máxima aceita      | 150 m                                        |
+| Fila offline                | 60 amostras / 15 min                         |
+| Idade máxima da amostra     | 120 s (tolera até 60 s de relógio adiantado) |
+| Novo envio no servidor      | throttle mínimo de 5 s                       |
+| Timestamp aceito            | entre 15 min antes e 1 min depois            |
 
 A fila preserva `recorded_at` original. Amostras repetidas ou fora de ordem não sobrescrevem a
-posição mais recente; respostas `429` são repetidas em 2,5 s; falhas de rede/5xx usam espera de 5 a
-60 s com recuo exponencial.
+posição mais recente; respostas `429` são repetidas em 2,5 s, sem aumentar o recuo de rede; falhas
+de rede/5xx usam espera de 5 a 60 s com recuo exponencial. Amostras com carimbo ausente, futuro
+acima de 1 min ou idade superior a 2 min são descartadas antes de entrar na fila.
 
 ### Sessão
 
@@ -100,8 +114,11 @@ posição mais recente; respostas `429` são repetidas em 2,5 s; falhas de rede/
 - Ao iniciar o serviço, o app pausa o auto-refresh do SDK JS e entrega URL, chave pública, token de
   acesso, refresh token e expiração ao processo nativo por `Intent` em memória.
 - O serviço renova o token em `401` ou perto do vencimento (`/auth/v1/token?grant_type=refresh_token`)
-  e repassa os novos tokens ao JS quando a interface volta ao primeiro plano.
+  e repassa os novos tokens ao JS a cada evento de status; a interface adota a sessão renovada.
+- O log da ponte do Capacitor fica desligado (`loggingBehavior: "none"`), porque o padrão de debug
+  gravaria o payload do plugin de armazenamento seguro — inclusive tokens — no logcat.
 - Tokens não são gravados em disco pelo serviço, não aparecem em notificação e não vão para logs.
+- `allowBackup=false` impede cópia do armazenamento do app por backup/transferência.
 - **Nenhum `service_role`, chave administrativa ou segredo de servidor existe no aplicativo.** A
   chave embarcada é a chave pública `anon`, a mesma do site.
 
@@ -110,11 +127,14 @@ posição mais recente; respostas `429` são repetidas em 2,5 s; falhas de rede/
 - `ACCESS_FINE_LOCATION` e `ACCESS_COARSE_LOCATION` — solicitadas em tempo de execução antes de
   iniciar o serviço.
 - `FOREGROUND_SERVICE` e `FOREGROUND_SERVICE_LOCATION`.
+- `ACCESS_NETWORK_STATE` — usada apenas para detectar a volta da rede e retomar a fila.
 - `POST_NOTIFICATIONS` (Android 13+) — solicitada ao iniciar; sem ela o serviço ainda funciona, mas a
   notificação pode ficar oculta.
 - A permissão negada é mostrada na interface; o serviço não inicia sem localização autorizada.
 - O app não pede localização em segundo plano (`ACCESS_BACKGROUND_LOCATION`) porque o serviço em
-  primeiro plano com notificação cobre o caso de uso.
+  primeiro plano com notificação cobre o caso de uso. Por isso o serviço só pode ser iniciado com o
+  app visível.
+- `android:allowBackup="false"` no manifesto; o app é debug e usa apenas a assinatura de debug.
 
 ## Segurança e isolamento
 
@@ -157,32 +177,33 @@ homologação. Localização fornecida por **provedor de teste do Android** (`cm
 pois `adb emu geo fix` não chegou ao provedor GPS desta imagem. Isso é simulação de posição, não
 GNSS real.
 
-| Verificação                         | Resultado observado                                                                                                       |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Build e instalação                  | `assembleDebug` concluído; APK instalado e aberto no emulador                                                             |
-| Login, loja e entrega               | login por e-mail/senha, seleção de loja, duas entregas listadas, detalhe completo                                         |
-| Serviço em primeiro plano           | `isForeground=true`, id 4211, canal `avd_delivery_tracking`                                                               |
-| Envio nativo com a interface aberta | posições gravadas no Supabase por RPC direta                                                                              |
-| Movimento                           | 12 atualizações a cada ~12,2 s, em passos simulados de ~44 m (regra de desvio)                                            |
-| Tela bloqueada                      | `mWakefulness=Asleep`; 7 atualizações em ~73 s, sem interrupção                                                           |
-| Outro aplicativo em primeiro plano  | Configurações à frente; atualizações continuaram durante ~62 s                                                            |
-| Perda de rede                       | 61 s sem rede; 5 amostras na fila, estado “Sem conexão”; ao voltar, todas foram enviadas com o `recorded_at` original     |
-| Parar compartilhamento              | serviço encerrado, linha apagada, interface voltou ao estado inicial                                                      |
-| Concluir entrega                    | entrega passou a `delivered`, serviço encerrado e posição apagada                                                         |
-| Reatribuição pelo dono              | próximo envio recusado como entrega inativa; serviço encerrado, posição apagada e tela marcada como cancelada/reatribuída |
-| Testes automatizados                | 30 Vitest + 22 testes JVM (10 throttle, 4 fila, 7 cliente HTTP e 1 de exemplo do template) aprovados                      |
+| Verificação                        | Resultado observado                                                                                          |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Build e instalação                 | `assembleDebug` concluído; APK reinstalado e aberto no emulador                                              |
+| Login, loja e entrega              | login por e-mail/senha, seleção de loja, três entregas listadas, detalhe completo                            |
+| Serviço em primeiro plano          | `isForeground=true`, id 4211, canal `avd_delivery_tracking`                                                  |
+| Token renovado                     | expiração forçada para 2 s; refresh em `/auth/v1/token`, access/refresh trocados, envio continuou            |
+| Tela bloqueada por 30 min          | `mWakefulness=Asleep`; 182 gravações em 1.854 s, média 10,2 s, maior intervalo 16,3 s, nenhuma falha         |
+| Outro aplicativo em primeiro plano | Configurações à frente por ~62 s; 10 gravações em 84,6 s, maior intervalo 10,3 s                             |
+| Perda de rede                      | 45 s em modo avião; 6 amostras na fila; maior intervalo 52,8 s; fila drenada após a volta da rede            |
+| Localização desligada e religada   | 35 s desligada; aviso na interface; maior intervalo 40,9 s; retomada ~6 s após religar                       |
+| Economia de bateria                | `Battery Saver: ON`; 7 gravações em 62,2 s, maior intervalo 11,2 s                                           |
+| Doze forçado                       | `mState=IDLE` com tela bloqueada; 26 gravações em 244,5 s, maior intervalo 11,3 s                            |
+| Processo encerrado                 | `am force-stop` encerrou serviço e processo; ao reabrir, nada reiniciou sozinho e o botão voltou a “Iniciar” |
+| Logs e credenciais                 | 0 JWTs, tokens, coordenadas ou payloads de armazenamento seguro em 941 linhas de logcat                      |
+| Testes automatizados               | 30 Vitest + 26 JVM (12 throttle, 5 fila, 8 HTTP e 1 de exemplo) + 5 instrumentados aprovados                 |
 
 ### O que não foi medido
 
 - Dispositivo físico, GNSS real, trajeto em rua, túnel, prédio e troca de torre.
-- Doze, suspensão profunda, otimização de bateria de fabricantes e reinício do aparelho.
+- Reinício do aparelho, otimização de bateria de fabricantes e Doze real com outros apps.
 - Consumo de bateria e de dados móveis por turno — exigem aparelho real e instrumentação.
-- Tela bloqueada por períodos longos (horas) e bloqueio de tela com o app removido da lista de
-  recentes.
+- Tela bloqueada por horas e bloqueio com o app removido da lista de recentes.
 - iOS: não há Xcode neste ambiente; nada foi compilado.
 
-O emulador permanece ligado à energia e não reproduz as restrições de fabricante. Por isso a Etapa
-5B **não homologa** GPS em segundo plano; entrega a prova de conceito e registra as pendências.
+O emulador não reproduz as restrições de fabricante. Por isso a Etapa 5C **não homologa** GPS em
+aparelho físico; entrega evidências de emulador e registra as pendências. Os critérios para a
+homologação física estão em [android-device-validation.md](android-device-validation.md).
 
 ## iOS — arquitetura equivalente
 
@@ -205,10 +226,14 @@ foi contratado.
 ## Limitações conhecidas
 
 - Prova de conceito, não produto publicado; falta assinatura de release e política de distribuição.
-- Sem ícone/splash definitivos, sem testes instrumentados (Espresso/UIAutomator) e sem testes em
-  aparelhos reais.
+- Sem ícone/splash definitivos e sem testes em aparelhos reais. Há testes instrumentados de
+  manifesto, permissões e serviço, executados no emulador.
 - O emulador usado não aceitou injeção pelo GPS virtual; a validação usou provedor de teste, o que
-  não substitui GNSS real.
+  não substitui GNSS real. Doze e economia de bateria foram simulados por comandos.
+- A revogação de permissão em tempo de execução não chegou a ser testada no emulador; o caminho de
+  falha está implementado, mas não tem evidência de execução desta etapa.
+- Doze forçado com o serviço em primeiro plano não interrompeu o envio no AVD; isso não garante o
+  mesmo comportamento em fabricantes que restringem serviços em segundo plano.
 - O `service_role` nunca é usado no app; por isso, fixtures de teste continuam sendo criadas por
   scripts locais fora do aplicativo.
 - Custo e comportamento em escala continuam estimados (ver [gps-costs.md](gps-costs.md)).

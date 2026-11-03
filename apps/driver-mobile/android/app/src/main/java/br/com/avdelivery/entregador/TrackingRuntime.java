@@ -20,13 +20,13 @@ public final class TrackingRuntime {
 
     private static volatile Runnable observer;
 
-    private static String baseUrl;
-    private static String anonKey;
-    private static String accessToken;
-    private static String refreshToken;
-    private static long expiresAt;
-    private static String deliveryId;
-    private static String userId;
+    private static volatile String baseUrl;
+    private static volatile String anonKey;
+    private static volatile String accessToken;
+    private static volatile String refreshToken;
+    private static volatile long expiresAt;
+    private static volatile String deliveryId;
+    private static volatile String userId;
 
     private static volatile boolean running;
     private static volatile String state = STATE_IDLE;
@@ -213,6 +213,17 @@ public final class TrackingRuntime {
 
     public static JSONObject snapshot() {
         JSONObject payload = new JSONObject();
+        String token;
+        String refresh;
+        long expiration;
+        String currentUser;
+
+        synchronized (LOCK) {
+            token = accessToken;
+            refresh = refreshToken;
+            expiration = expiresAt;
+            currentUser = userId;
+        }
 
         try {
             payload.put("running", running);
@@ -226,11 +237,11 @@ public final class TrackingRuntime {
             payload.put("queued", queued);
             payload.put("sentCount", sentCount);
 
-            if (accessToken != null) {
-                payload.put("accessToken", accessToken);
-                payload.put("refreshToken", refreshToken == null ? JSONObject.NULL : refreshToken);
-                payload.put("expiresAt", expiresAt);
-                payload.put("userId", userId == null ? JSONObject.NULL : userId);
+            if (token != null) {
+                payload.put("accessToken", token);
+                payload.put("refreshToken", refresh == null ? JSONObject.NULL : refresh);
+                payload.put("expiresAt", expiration);
+                payload.put("userId", currentUser == null ? JSONObject.NULL : currentUser);
             }
         } catch (JSONException ignored) {
             // Values above are primitives; the payload is always serializable.

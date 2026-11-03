@@ -3,7 +3,7 @@
 > Documento de modelagem. Os valores marcados como **estimados** são projeções a partir de preços
 > públicos e das regras de throttle implementadas; os marcados como **medidos** vêm de execuções
 > reais de homologação. Não há tráfego de produção: a Etapa 5 foi homologada parcialmente em projeto
-> de testes, e a Etapa 5B foi exercitada apenas em emulador.
+> de testes, e o app Android foi exercitado apenas em emulador (Etapas 5B e 5C).
 
 ## Premissas
 
@@ -155,17 +155,18 @@ acima é otimista porque considera só a infraestrutura de dados.
 A distinção abaixo é deliberada: **estimativa** é projeção a partir de preços e do throttle;
 **medição** é o que foi observado em execução real de homologação.
 
-| Tipo       | Item                                          | Resultado                                                                                                                                 |
-| ---------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Medição    | Produção                                      | 0 requisições; nenhum banco de produção foi acessado                                                                                      |
-| Medição    | Integração (Vitest)                           | 9 testes criam e encerram entregas; envios pontuais por RPC, sem laço contínuo                                                            |
-| Medição    | E2E web                                       | sessão de ~15 s com GPS simulado gerou 2 gravações (posição inicial + deslocamento)                                                       |
-| Medição    | App Android em emulador                       | movimento simulado gerou 1 gravação a cada ~12 s; 5 amostras ficaram 61 s em fila offline e foram enviadas depois, com o horário original |
-| Medição    | App Android em emulador — tela bloqueada      | 7 gravações em ~73 s com o serviço em primeiro plano                                                                                      |
-| Estimativa | Amostras por entrega                          | 60 (throttle de 8–60 s)                                                                                                                   |
-| Estimativa | Egress Supabase por mês                       | 0,54–27 GB nos cenários de 10–500 lojas                                                                                                   |
-| Estimativa | Egress de basemap por mês                     | 10,8–540 GB (OpenFreeMap, fora da franquia Supabase)                                                                                      |
-| Não medido | Bateria, dados móveis e volume real por turno | Só podem ser medidos em dispositivo físico, pendente nesta etapa                                                                          |
+| Tipo       | Item                                           | Resultado                                                                                                                                 |
+| ---------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Medição    | Produção                                       | 0 requisições; nenhum banco de produção foi acessado                                                                                      |
+| Medição    | Integração (Vitest)                            | 9 testes criam e encerram entregas; envios pontuais por RPC, sem laço contínuo                                                            |
+| Medição    | E2E web                                        | sessão de ~15 s com GPS simulado gerou 2 gravações (posição inicial + deslocamento)                                                       |
+| Medição    | App Android em emulador                        | movimento simulado gerou 1 gravação a cada ~10 s; 6 amostras ficaram 45 s em fila offline e foram enviadas depois, com o horário original |
+| Medição    | App Android em emulador — tela bloqueada       | 182 gravações em 1.854 s (~30 min), média de 10,2 s, maior intervalo de 16,3 s, sem falhas                                                |
+| Medição    | App Android em emulador — Doze forçado         | 26 gravações em 244,5 s com tela bloqueada; maior intervalo de 11,3 s                                                                     |
+| Não medido | Dados móveis e bateria do app em aparelho real | só podem ser medidos em dispositivo físico, ainda pendente                                                                                |
+| Estimativa | Amostras por entrega                           | 60 (throttle de 8–60 s)                                                                                                                   |
+| Estimativa | Egress Supabase por mês                        | 0,54–27 GB nos cenários de 10–500 lojas                                                                                                   |
+| Estimativa | Egress de basemap por mês                      | 10,8–540 GB (OpenFreeMap, fora da franquia Supabase)                                                                                      |
 
 - **Conclusão de custo:** o desenho é barato e previsível do lado do Supabase; o risco está no
   basemap em escala, no compute sob pico e nos custos fixos fora do Supabase.

@@ -11,6 +11,8 @@ import android.content.pm.ServiceInfo;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -18,6 +20,7 @@ import android.os.Looper;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -54,6 +57,8 @@ public class TrackingService extends Service {
 
     private LocationManager locationManager;
     private LocationListener locationListener;
+    private ConnectivityManager connectivityManager;
+    private ConnectivityManager.NetworkCallback networkCallback;
     private long retryDelayMs = RETRY_MIN_MS;
     private Runnable pendingRetry;
 
@@ -67,6 +72,26 @@ public class TrackingService extends Service {
     public void onCreate() {
         super.onCreate();
         createChannel();
+        locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        // A single listener instance is reused for every subscription. Creating
+        // a new lambda on each retry would leave the previous registration
+        // active and deliver duplicated fixes.
+        locationListener = new LocationListener() {
+            @Override
+            public void onLocationChanged(Location location) {
+                onLocation(location);
+            }
+
+            @Override
+            public void onProviderEnabled(String provider) {
+                handler.post(TrackingService.this::onProvidersChanged);
+            }
+
+            @Override
+            public void onProviderDisabled(String provider) {
+                handler.post(TrackingService.this::onProvidersChanged);
+            }
+        };
     }
 
     @Override
@@ -103,14 +128,31 @@ public class TrackingService extends Service {
             return START_NOT_STICKY;
         }
 
-        startForegroundWithNotification(deliveryId);
+        if (!hasLocationPermission()) {
+            TrackingRuntime.fail("Permissão de localização removida. Autorize novamente.");
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
+        if (!startForegroundWithNotification(deliveryId)) {
+            return START_NOT_STICKY;
+        }
+
         TrackingRuntime.begin(url, anonKey, accessToken, refreshToken, expiresAt, deliveryId, userId);
+        registerNetworkCallback();
 
         if (!startLocationUpdates()) {
             handler.postDelayed(this::retryProviders, 15_000L);
         }
 
         return START_NOT_STICKY;
+    }
+
+    private boolean hasLocationPermission() {
+        return ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED
+                || ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
     }
 
     private void createChannel() {
@@ -134,13 +176,29 @@ public class TrackingService extends Service {
         manager.createNotificationChannel(channel);
     }
 
-    private void startForegroundWithNotification(String deliveryId) {
+    private boolean startForegroundWithNotification(String deliveryId) {
         Notification notification = buildNotification(deliveryId);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
-        } else {
-            startForeground(NOTIFICATION_ID, notification);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                );
+            } else {
+                startForeground(NOTIFICATION_ID, notification);
+            }
+
+            return true;
+        } catch (RuntimeException error) {
+            // SecurityException (permission revoked) and
+            // MissingForegroundServiceTypeException both derive from
+            // RuntimeException; without a foreground notification the service
+            // would be killed on Android 12+, so fail explicitly.
+            TrackingRuntime.fail("Não foi possível manter o rastreamento em primeiro plano.");
+            stopSelf();
+            return false;
         }
     }
 
@@ -185,12 +243,24 @@ public class TrackingService extends Service {
             locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         }
 
-        if (locationManager == null) {
-            TrackingRuntime.setState(TrackingRuntime.STATE_ERROR, "Serviço de localização indisponível.");
+        if (locationManager == null || locationListener == null) {
+            TrackingRuntime.setState(TrackingRuntime.STATE_STARTING, "Serviço de localização indisponível.");
             return false;
         }
 
-        locationListener = this::onLocation;
+        if (!hasLocationPermission()) {
+            TrackingRuntime.fail("Permissão de localização removida. Autorize novamente.");
+            handler.post(this::shutdown);
+            return false;
+        }
+
+        try {
+            // Replace any previous subscription so retries and provider
+            // toggles never leave duplicate listeners behind.
+            locationManager.removeUpdates(locationListener);
+        } catch (SecurityException ignored) {
+            // Permission revoked; the checks below will fail as well.
+        }
 
         boolean requested = false;
 
@@ -216,8 +286,8 @@ public class TrackingService extends Service {
 
         if (!requested) {
             TrackingRuntime.setState(
-                    TrackingRuntime.STATE_ERROR,
-                    "Ative a localização do aparelho para compartilhar a entrega."
+                    TrackingRuntime.STATE_STARTING,
+                    "Ative a localização do aparelho para continuar compartilhando."
             );
             return false;
         }
@@ -227,6 +297,92 @@ public class TrackingService extends Service {
         }
 
         return true;
+    }
+
+    /**
+     * Reacts to the user turning location off/on. The service keeps running so
+     * the notification and the queue survive; only the fix source pauses.
+     */
+    private void onProvidersChanged() {
+        if (!TrackingRuntime.isRunning() || locationManager == null) {
+            return;
+        }
+
+        boolean gps;
+        boolean network;
+
+        try {
+            gps = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+            network = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+        } catch (RuntimeException error) {
+            gps = false;
+            network = false;
+        }
+
+        if (!gps && !network) {
+            TrackingRuntime.setState(
+                    TrackingRuntime.STATE_STARTING,
+                    "Localização desativada. Ative o GPS para continuar compartilhando."
+            );
+            return;
+        }
+
+        startLocationUpdates();
+    }
+
+    private void registerNetworkCallback() {
+        if (networkCallback != null) {
+            return;
+        }
+
+        connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+
+        if (connectivityManager == null) {
+            return;
+        }
+
+        networkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network network) {
+                handler.post(TrackingService.this::onNetworkAvailable);
+            }
+        };
+
+        try {
+            connectivityManager.registerDefaultNetworkCallback(networkCallback);
+        } catch (RuntimeException error) {
+            networkCallback = null;
+        }
+    }
+
+    private void unregisterNetworkCallback() {
+        if (networkCallback == null || connectivityManager == null) {
+            networkCallback = null;
+            return;
+        }
+
+        try {
+            connectivityManager.unregisterNetworkCallback(networkCallback);
+        } catch (RuntimeException ignored) {
+            // Already unregistered by the system.
+        }
+
+        networkCallback = null;
+    }
+
+    /**
+     * Reconnection is the fastest path out of the offline state: clear the
+     * backoff and try the queue immediately instead of waiting up to 60 s.
+     */
+    private void onNetworkAvailable() {
+        if (!TrackingRuntime.isRunning()) {
+            return;
+        }
+
+        retryDelayMs = RETRY_MIN_MS;
+        // A short delay lets any in-flight drain finish; the single-flight
+        // guard would otherwise swallow this attempt.
+        handler.postDelayed(this::drain, 300L);
     }
 
     private void retryProviders() {
@@ -248,6 +404,17 @@ public class TrackingService extends Service {
         double longitude = location.getLongitude();
         double accuracy = location.hasAccuracy() ? location.getAccuracy() : 999d;
         long now = System.currentTimeMillis();
+        long recordedAt = location.getTime();
+
+        if (recordedAt <= 0L || recordedAt > now + 60_000L) {
+            // A missing or future-dated fix is timestamped with the device
+            // clock; the server rejects timestamps beyond +1 minute.
+            recordedAt = now;
+        }
+
+        if (!LocationThrottle.isFresh(recordedAt, now)) {
+            return;
+        }
 
         if (!LocationThrottle.isUsableFix(latitude, longitude, accuracy)) {
             return;
@@ -268,7 +435,9 @@ public class TrackingService extends Service {
             return;
         }
 
-        queue.enqueue(new LocationSample(latitude, longitude, accuracy, now), now);
+        // The queue keeps the original fix time, so an offline batch replays
+        // with the real collection instant instead of the flush instant.
+        queue.enqueue(new LocationSample(latitude, longitude, accuracy, recordedAt), now);
         TrackingRuntime.setQueued(queue.size());
         drain();
     }
@@ -322,7 +491,9 @@ public class TrackingService extends Service {
 
                     if (result.status >= 200 && result.status < 300) {
                         if (result.isRateLimited()) {
-                            scheduleRetry(RATE_LIMIT_RETRY_MS);
+                            // Server throttle is not a network failure: keep
+                            // the network backoff unchanged.
+                            scheduleRetry(RATE_LIMIT_RETRY_MS, false);
                             return;
                         }
 
@@ -369,6 +540,10 @@ public class TrackingService extends Service {
     }
 
     private void scheduleRetry(long delayMs) {
+        scheduleRetry(delayMs, true);
+    }
+
+    private void scheduleRetry(long delayMs, boolean escalate) {
         if (pendingRetry != null) {
             handler.removeCallbacks(pendingRetry);
         }
@@ -382,7 +557,10 @@ public class TrackingService extends Service {
         };
 
         handler.postDelayed(pendingRetry, delayMs);
-        retryDelayMs = Math.min(RETRY_MAX_MS, retryDelayMs * 2);
+
+        if (escalate) {
+            retryDelayMs = Math.min(RETRY_MAX_MS, retryDelayMs * 2);
+        }
     }
 
     private void terminate(String message) {
@@ -427,6 +605,8 @@ public class TrackingService extends Service {
             pendingRetry = null;
         }
 
+        unregisterNetworkCallback();
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE);
         } else {
@@ -447,6 +627,7 @@ public class TrackingService extends Service {
         }
 
         handler.removeCallbacksAndMessages(null);
+        unregisterNetworkCallback();
         executor.shutdownNow();
 
         if (TrackingRuntime.isRunning()) {

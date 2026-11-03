@@ -68,4 +68,22 @@ public class LocationThrottleTest {
     public void neverSendsImpreciseFix() {
         assertFalse(LocationThrottle.shouldSend(false, 0, 0, 0, LAT, LNG, 900, 1_000L));
     }
+
+    @Test
+    public void acceptsRecentAndSmallFutureSkew() {
+        long now = 1_700_000_000_000L;
+
+        assertTrue(LocationThrottle.isFresh(now, now));
+        assertTrue(LocationThrottle.isFresh(now - LocationThrottle.MAX_FIX_AGE_MS, now));
+        assertTrue(LocationThrottle.isFresh(now + 60_000L, now));
+    }
+
+    @Test
+    public void rejectsStaleMissingAndFutureFixes() {
+        long now = 1_700_000_000_000L;
+
+        assertFalse(LocationThrottle.isFresh(now - LocationThrottle.MAX_FIX_AGE_MS - 1L, now));
+        assertFalse(LocationThrottle.isFresh(0L, now));
+        assertFalse(LocationThrottle.isFresh(now + 60_001L, now));
+    }
 }

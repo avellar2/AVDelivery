@@ -22,6 +22,13 @@ allprojects {
         google()
         mavenCentral()
     }
+    // Kotlin 1.8 merged the jdk7/jdk8 extension classes into kotlin-stdlib.
+    // Capacitor test dependencies still resolve the old split artifacts,
+    // which duplicate classes in the androidTest classpath.
+    configurations.configureEach {
+        exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk7"
+        exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk8"
+    }
 }
 
 task clean(type: Delete) {

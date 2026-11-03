@@ -2,8 +2,12 @@ package br.com.avdelivery.entregador;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class SampleQueueTest {
     private static LocationSample sample(long recordedAt) {
@@ -51,5 +55,43 @@ public class SampleQueueTest {
         queue.clear();
 
         assertEquals(0, queue.size());
+    }
+
+    @Test
+    public void concurrentProducersKeepQueueBounded() throws Exception {
+        SampleQueue queue = new SampleQueue(50, 3_600_000L);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        CountDownLatch start = new CountDownLatch(1);
+        Thread[] threads = new Thread[4];
+
+        for (int index = 0; index < threads.length; index++) {
+            final int worker = index;
+            threads[index] = new Thread(() -> {
+                try {
+                    start.await();
+
+                    for (int item = 0; item < 2_000; item++) {
+                        long timestamp = (long) worker * 10_000L + item;
+                        queue.enqueue(sample(timestamp), timestamp);
+
+                        if (item % 3 == 0) {
+                            queue.pop();
+                        }
+                    }
+                } catch (Throwable error) {
+                    failure.compareAndSet(null, error);
+                }
+            });
+            threads[index].start();
+        }
+
+        start.countDown();
+
+        for (Thread thread : threads) {
+            thread.join(10_000L);
+        }
+
+        assertNull(failure.get());
+        assertTrue(queue.size() <= 50);
     }
 }

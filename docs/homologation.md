@@ -12,10 +12,14 @@ plano foi validado; o envio com tela bloqueada/app em segundo plano permanece pe
 dispositivo físico. Detalhes nas seções finais.
 
 A Etapa 5B entregou uma prova de conceito de aplicativo Android (`apps/driver-mobile`) com serviço
-em primeiro plano e envio HTTP nativo. Ela foi exercitada **somente em emulador**, com posição
-simulada, e por isso **não homologa** GPS em segundo plano nem substitui teste em aparelho real.
-Não houve migração nova e nenhum banco de produção foi acessado. Ver
-[gps-android.md](gps-android.md).
+em primeiro plano e envio HTTP nativo. A Etapa 5C ampliou a validação no mesmo emulador: 30 minutos
+de tela bloqueada, Doze forçado, economia de bateria, perda de rede, localização desligada,
+processo encerrado e renovação de token. A revogação de permissão e o ciclo de
+reatribuição/conclusão/cancelamento durante o rastreamento ficaram pendentes. Tudo foi exercitado
+**somente em emulador**, com posição simulada, e por isso **não homologa** GPS em segundo plano nem
+substitui teste em aparelho real. Não houve migração nova e nenhum banco de produção foi acessado.
+Ver [gps-android.md](gps-android.md) e
+[android-device-validation.md](android-device-validation.md).
 
 A Etapa 1 está detalhada abaixo; a homologação da Etapa 2 está na seção seguinte.
 
@@ -731,3 +735,87 @@ checkout. A validação usou o mesmo projeto Supabase de homologação.
 
 Reprodução: ver [gps-android.md](gps-android.md). Os fixtures de teste são criados por scripts
 locais, nunca pelo aplicativo.
+
+## Etapa 5C — validação nativa Android e estabilidade do GPS
+
+**Status: validação ampliada em emulador; sem homologação em aparelho físico.**
+
+Nenhum aparelho físico estava conectado (`adb devices` listou apenas `emulator-5554`). Todos os
+cenários abaixo foram executados no AVD `avd-driver-api33` (Android 13, API 33, x86_64), com posição
+simulada por provedor de teste, contra o mesmo projeto Supabase de homologação. Não houve migração
+nova, alteração de RPC, acesso a produção ou publicação de aplicativo.
+
+### Correções aplicadas nesta etapa
+
+- `allowBackup=false` no manifesto e no APK, para impedir cópia do armazenamento do app por backup ou
+  transferência.
+- `ACCESS_NETWORK_STATE` e um `NetworkCallback` para retomar a fila assim que a rede volta, sem
+  esperar o recuo máximo de 60 s.
+- Estado de sessão (`TrackingRuntime`) com leitura sincronizada, evitando token inconsistente entre
+  o laço de envio e a renovação.
+- Início do primeiro plano protegido: falha de `ForegroundServiceStartNotAllowedException` ou
+  `SecurityException` encerra o serviço com mensagem, em vez de deixá-lo ser morto pelo sistema.
+- Um único `LocationListener` reutilizado e `removeUpdates` no encerramento, sem listeners vazados.
+- Verificação de idade/futuro do fix antes de entrar na fila; amostras fora da janela são
+  descartadas em vez de rejeitadas pelo servidor.
+- `429` do servidor repetido em 2,5 s sem escalar o recuo de rede.
+- Log da ponte do Capacitor desligado (`loggingBehavior: "none"`), porque o padrão de debug gravaria
+  o payload do armazenamento seguro — inclusive tokens — no logcat.
+- Testes instrumentados e correção da duplicação de classes Kotlin (`kotlin-stdlib-jdk7/jdk8`) na
+  configuração de build.
+
+### Resultados observados
+
+| Cenário                             | Resultado                                                                                                        |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Tela bloqueada por 30 min           | `mWakefulness=Asleep`; 182 gravações em 1.854 s; média 10,2 s; maior intervalo 16,3 s; 0 falhas                  |
+| Outro app em primeiro plano         | 10 gravações em 84,6 s; maior intervalo 10,3 s                                                                   |
+| Rede desligada por 45 s             | 6 amostras na fila; maior intervalo 52,8 s; fila drenada ~8 s após reconectar                                    |
+| Localização desligada por 35 s      | aviso “Localização desativada…” na interface; maior intervalo 40,9 s; retomada ~6 s após religar                 |
+| Economia de bateria                 | `Battery Saver: ON`; 7 gravações em 62,2 s; maior intervalo 11,2 s                                               |
+| Doze forçado                        | `mState=IDLE` com tela bloqueada; 26 gravações em 244,5 s; maior intervalo 11,3 s                                |
+| Token expirado                      | renovação nativa em `/auth/v1/token`, access/refresh trocados, envio continuou                                   |
+| `force-stop`                        | serviço e processo encerrados; nada reiniciou sozinho; ao reabrir, botão voltou a “Iniciar”                      |
+| Revogação de permissão              | não executado nesta etapa; o caminho de falha existe no app, sem evidência de execução                           |
+| Reatribuição durante o rastreamento | não executado pelo app; encerramento coberto pela integração do servidor, não por evidência de emulador          |
+| Conclusão durante o rastreamento    | não executado nesta etapa; conclusão pela interface foi exercitada na Etapa 5B                                   |
+| Cancelamento após a coleta          | não executado; o servidor recusa cancelamento após a coleta (coberto por integração)                             |
+| Motorista desativado                | não executado; caminho `driver_inactive` implementado, sem evidência                                             |
+| Fila offline longa                  | teste de ~16 min iniciado; fila chegou a 19 amostras em ~6,5 min, sem erro; a sessão terminou antes da reconexão |
+| Wi-Fi ↔ móvel                       | não observável no emulador (interface virtual única); recuperação de rede coberta pelo modo avião                |
+| Segurança                           | 0 `service_role` no APK; 0 JWTs/tokens/coordenadas em 941 linhas de logcat; sessão cifrada no `AndroidKeyStore`  |
+
+### Testes e builds
+
+- 30 testes Vitest do app, 26 JVM (throttle, fila e cliente HTTP) e 5 instrumentados no emulador.
+- 207 testes da raiz, typecheck, lint, Prettier, build Next.js, build web + `cap sync` +
+  `assembleDebug` e instalação do APK de debug.
+- Android lint sem erros (18 avisos) quando o `local.properties` da máquina é excluído da análise;
+  o `PropertyEscape` apontado nesse arquivo é específico da máquina e não do projeto.
+
+### Limitações e pendências
+
+- Nenhuma medição física, de GNSS real, de bateria ou de dados móveis por turno.
+- Android 14/15/16 não foram executados; apenas compilados com `targetSdk` 36.
+- Doze, economia de bateria e modo avião foram acionados por comando, não por uso real.
+- Revogação de permissão e ciclo de reatribuição/conclusão/cancelamento no app não foram executados:
+  a sessão de validação terminou antes desses cenários.
+- Wi-Fi ↔ móvel real não existe no emulador.
+- iOS não compilado.
+
+Critérios completos para declarar homologação física em
+[android-device-validation.md](android-device-validation.md).
+
+### Critérios de aceite da Etapa 5C
+
+- [x] Auditoria de manifesto, permissões, `targetSdk`/`minSdk` e serviço em primeiro plano.
+- [x] Serviço mantém envio com tela bloqueada, outro app à frente, Doze e economia de bateria.
+- [x] Recuperação após perda de rede, localização desligada, renovação de token e processo encerrado.
+- [ ] Revogação por reatribuição, conclusão, cancelamento e desativação encerra o serviço **no app**.
+      No servidor, o comportamento é coberto pela integração; o encerramento no app não foi exercitado.
+- [x] Fila limitada (testes JVM) e sem segredos em disco (armazenamento verificado); reenvio após
+      entrega encerrada coberto pela integração do servidor.
+- [x] Nenhum `service_role` no APK; logs sem tokens ou coordenadas.
+- [x] Suítes, typecheck, lint, Prettier, build Next.js e build Android aprovados.
+- [ ] Homologação em aparelho físico Android com GNSS real e tela bloqueada prolongada.
+- [ ] Execução em Android 14 ou superior em aparelho real.

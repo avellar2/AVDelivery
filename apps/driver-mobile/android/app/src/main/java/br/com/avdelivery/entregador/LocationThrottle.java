@@ -11,6 +11,8 @@ public final class LocationThrottle {
     public static final double MIN_MOVEMENT_METERS = 25d;
     public static final double MIN_DRIFT_METERS = 10d;
     public static final double MAX_ACCURACY_METERS = 150d;
+    /** Fixes older than this are discarded instead of sent as if current. */
+    public static final long MAX_FIX_AGE_MS = 120_000L;
 
     private static final double EARTH_RADIUS_METERS = 6_371_000d;
 
@@ -33,6 +35,19 @@ public final class LocationThrottle {
             return false;
         }
         return accuracyMeters > 0d && accuracyMeters <= MAX_ACCURACY_METERS;
+    }
+
+    public static boolean isFresh(long recordedAt, long now) {
+        if (recordedAt <= 0L) {
+            return false;
+        }
+
+        long age = now - recordedAt;
+
+        // A fix slightly ahead of the device clock is accepted; older than the
+        // limit is dropped so a stale cached location never overwrites a
+        // recent one on the server.
+        return age <= MAX_FIX_AGE_MS && age >= -60_000L;
     }
 
     public static boolean shouldSend(

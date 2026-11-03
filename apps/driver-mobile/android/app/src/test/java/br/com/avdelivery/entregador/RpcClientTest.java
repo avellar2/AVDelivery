@@ -60,6 +60,19 @@ public class RpcClientTest {
     }
 
     @Test
+    public void unauthorizedRequiresRefreshAndForbiddenTerminates() {
+        RpcClient.Result unauthorized = RpcClient.Result.of(401, "{}");
+
+        assertEquals(401, unauthorized.status);
+        assertFalse(unauthorized.isTerminal());
+        assertFalse(unauthorized.isDiscardable());
+
+        RpcClient.Result forbidden = RpcClient.Result.of(403, "{\"message\":\"forbidden\"}");
+
+        assertTrue(forbidden.isTerminal());
+    }
+
+    @Test
     public void transportFailureIsRetryable() {
         RpcClient.Result result = RpcClient.Result.transportFailure();
 

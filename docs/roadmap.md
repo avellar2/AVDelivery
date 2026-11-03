@@ -142,10 +142,13 @@ consistentes, acompanhamento do cliente e isolamento entre lojas validados contr
 ## Etapa 5 — Rastreamento GPS (homologação parcial em 2026-10-31)
 
 > **Estado:** web em primeiro plano homologado em Supabase real: 14 migrações aplicadas sem
-> `reset`, 207 testes Vitest (68 de integração) e 16 E2E. Envio com tela bloqueada/app em segundo
-> plano **não** homologado por falta de dispositivo físico. Resultados em
-> [homologation.md](homologation.md), arquitetura em [gps.md](gps.md) e custos em
-> [gps-costs.md](gps-costs.md).
+> `reset`, 207 testes Vitest (68 de integração) e 16 E2E. O app Android foi validado apenas em
+> emulador (Etapa 5C), inclusive com tela bloqueada por 30 minutos, Doze forçado, perda de rede,
+> localização desligada e processo encerrado. Revogação de permissão e ciclo de
+> reatribuição/conclusão pelo app ficaram pendentes. Envio em aparelho físico **não** homologado.
+> Resultados em [homologation.md](homologation.md),
+> [android-device-validation.md](android-device-validation.md), arquitetura em [gps.md](gps.md) e
+> custos em [gps-costs.md](gps-costs.md).
 
 Objetivo: permitir que o cliente acompanhe a aproximação do entregador durante a entrega.
 

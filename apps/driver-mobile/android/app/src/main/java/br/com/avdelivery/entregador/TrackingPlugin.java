@@ -3,6 +3,7 @@ package br.com.avdelivery.entregador;
 import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
+import android.location.LocationManager;
 import android.os.Build;
 
 import androidx.core.content.ContextCompat;
@@ -78,6 +79,11 @@ public class TrackingPlugin extends Plugin {
             return;
         }
 
+        if (!isLocationEnabled()) {
+            call.reject("Ative a localização do aparelho para compartilhar a entrega.");
+            return;
+        }
+
         Intent intent = new Intent(getContext(), TrackingService.class)
                 .setAction(TrackingService.ACTION_START)
                 .putExtra(TrackingService.EXTRA_URL, url)
@@ -91,7 +97,20 @@ public class TrackingPlugin extends Plugin {
         try {
             ContextCompat.startForegroundService(getContext(), intent);
         } catch (RuntimeException error) {
-            call.reject("Não foi possível iniciar o serviço de localização.");
+            // ForegroundServiceStartNotAllowedException (Android 12+) means the
+            // app was not visible; starting in the background is not allowed
+            // without ACCESS_BACKGROUND_LOCATION, which this app deliberately
+            // does not request.
+            String errorName = error.getClass().getSimpleName();
+
+            if ("ForegroundServiceStartNotAllowedException".equals(errorName)) {
+                call.reject("Mantenha o aplicativo aberto para iniciar o compartilhamento.");
+            } else if (error instanceof SecurityException) {
+                call.reject("Permissão de localização removida. Autorize novamente.");
+            } else {
+                call.reject("Não foi possível iniciar o serviço de localização.");
+            }
+
             return;
         }
 
@@ -158,6 +177,26 @@ public class TrackingPlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("granted", getPermissionState("notifications") == PermissionState.GRANTED);
         call.resolve(result);
+    }
+
+    private boolean isLocationEnabled() {
+        LocationManager manager =
+                (LocationManager) getContext().getSystemService(Context.LOCATION_SERVICE);
+
+        if (manager == null) {
+            return false;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            return manager.isLocationEnabled();
+        }
+
+        try {
+            return manager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                    || manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+        } catch (RuntimeException error) {
+            return false;
+        }
     }
 
     private JSObject snapshotQuietly() {

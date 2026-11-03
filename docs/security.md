@@ -518,6 +518,10 @@ endereços nunca são logados.
       validadas, revogação e limpeza conferidas, 9 integrações e 2 E2E verdes.
 - [x] Etapa 5B: app Android sem `service_role`, sessão em armazenamento seguro, envio nativo pelo
       mesmo RPC e revogação encerrando o serviço — validado em emulador.
+- [x] Etapa 5C: serviço em primeiro plano validado em emulador com tela bloqueada, Doze, bateria,
+      rede e processo encerrado; APK sem `service_role`, com `allowBackup=false`, serviço não
+      exportado e sessão cifrada por `AndroidKeyStore` (AES/GCM). Sem homologação física.
+- [ ] Revogação de permissão em tempo de execução e ciclo de reatribuição/conclusão no app.
 - [ ] Validar GPS físico e comportamento com tela bloqueada em Android e iOS.
 - [x] `service_role` usada apenas em scripts e em `src/lib/supabase/admin.ts` (server-only).
 - [ ] Habilitar leaked password protection (HIBP) no dashboard.
