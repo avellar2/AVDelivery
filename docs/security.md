@@ -542,7 +542,7 @@ endereços nunca são logados.
    há exportação nem busca por documento.
 10. **Segurança do projeto Supabase** (acesso ao dashboard, chaves, backups) é parte da fronteira de
     confiança e deve ser protegida com MFA e rotação de chaves.
-11. **Homologação em 2026-10-29 a 2026-11-04** — integrações com Auth/PostgREST/Storage, 306 testes
+11. **Homologação em 2026-10-29 a 2026-11-04** — integrações com Auth/PostgREST/Storage, 307 testes
     Vitest e 17 E2E, incluindo login/logout, recuperação, cardápio/uploads, pedidos, entregas,
     rastreamento, ciclo comercial e cobrança Sandbox interna. Pendências não bloqueantes: HIBP,
     entrega real de e-mail, rotação após expiração de 1h e homologação externa do Asaas. Ver
@@ -577,10 +577,10 @@ endereços nunca são logados.
     conferidos no banco. Rastreamento com tela bloqueada permanece pendente.
 23. **Localização é dado pessoal** — o envio é opt-in, limitado à entrega ativa e sem histórico. A
     posição é apagada ao concluir, cancelar, reatribuir ou parar o compartilhamento.
-24. **Cobrança em Sandbox, não em produção** — a integração Asaas da Etapa 6B está implementada e
-    testada internamente, mas a homologação externa é parcial por ausência de credenciais. Não há
-    ativação em produção, nota fiscal, estorno automático pela UI ou processamento assíncrono. A
-    ativação por pagamento depende do webhook/conciliação verificados.
+24. **Cobrança em Sandbox, não em produção** — a integração Asaas da Etapa 6B foi homologada de ponta
+    a ponta no Asaas Sandbox (cobrança Pix, confirmação simulada, webhook autenticado e liberação
+    transacional). Não há ativação em produção, nota fiscal, estorno automático pela UI ou
+    processamento assíncrono. A ativação por pagamento depende do webhook/conciliação verificados.
 25. **Isenção e trial são regras comerciais** — um superadministrador pode ativar ou isentar
     manualmente, sempre com evento auditável. O trial não é renovável automaticamente e não há
     prevenção de abuso por múltiplas lojas na mesma organização nesta etapa.

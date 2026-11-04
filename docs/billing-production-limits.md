@@ -68,7 +68,8 @@ cobrança real.
 
 ## Antes de considerar produção
 
-1. Homologar o ciclo externo no Sandbox (ver [billing-sandbox.md](billing-sandbox.md)).
+1. Repetir a homologação em ambiente com URL HTTPS estável (o Sandbox já foi homologado; ver
+   [billing-sandbox.md](billing-sandbox.md)).
 2. Revisar contrato, taxas, limites e obrigações fiscais com o provedor.
 3. Definir agendador externo para conciliação e alertas de falha.
 4. Implementar MFA/admin audit, CSP, rate limiting distribuído e observabilidade (Etapa 7).

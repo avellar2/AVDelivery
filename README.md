@@ -4,8 +4,8 @@ Plataforma SaaS multiempresa de delivery para hamburguerias, pizzarias, lanchone
 Comercialização por assinatura mensal por estabelecimento, sem comissão por pedido.
 
 **Status atual: Etapas 1, 2, 3 e 4 homologadas; Etapa 5 com homologação parcial; Etapas 5B e 5C
-com aplicativo Android validado apenas em emulador; Etapa 6A implementada; Etapa 6B implementada com
-homologação externa parcial (Asaas Sandbox sem credenciais)** em projeto Supabase exclusivo de testes
+com aplicativo Android validado apenas em emulador; Etapa 6A implementada; Etapa 6B homologada no
+Asaas Sandbox (2026-11-04, produção não ativada)** em projeto Supabase exclusivo de testes
 (2026-10-29 a 2026-11-04).
 
 A plataforma entrega autenticação, isolamento multiempresa por RLS, painel do estabelecimento,
@@ -19,8 +19,9 @@ ainda sem homologação em aparelho físico. A Etapa 6A adiciona planos, assinat
 administrativo, período de teste, carência e bloqueio de novas vendas sem acesso comercial. A Etapa
 6B adiciona cobrança recorrente via **Asaas Sandbox**: perfil de faturamento, cliente/assinatura/
 cobrança Pix, webhook autenticado, conciliação manual e tratamento de atraso/estorno/chargeback. A
-loja só é liberada após um pagamento confirmado e verificado; criar a assinatura não libera. Não há
-cobrança real, contrato ou conta de produção.
+loja só é liberada após um pagamento confirmado e verificado; criar a assinatura não libera. Nenhuma
+cobrança real em dinheiro, contrato ou conta de produção foi criada; a homologação usou apenas o
+Sandbox do Asaas.
 
 > Resultados reais, correções e pendências não bloqueantes: [docs/homologation.md](docs/homologation.md).
 
@@ -176,9 +177,10 @@ As variáveis `NEXT_PUBLIC_*` são embutidas no build. Configure-as antes de `np
 
 Para exercitar a cobrança da Etapa 6B:
 
-1. Obtenha a chave do **Sandbox** e defina `ASAAS_API_KEY` no `.env.local`.
-2. Gere um `ASAAS_WEBHOOK_TOKEN` forte (mínimo 24 caracteres) e cadastre o mesmo valor no webhook do
-   Sandbox apontando para `https://SEU-DOMINIO/api/webhooks/asaas`.
+1. Obtenha a chave do **Sandbox** e defina `ASAAS_API_KEY` no `.env.local`. Como a chave começa com
+   `$` e o Next.js interpola esse prefixo, escreva `ASAAS_API_KEY=\$aact_...`.
+2. Gere um `ASAAS_WEBHOOK_TOKEN` forte (32–255 caracteres) e cadastre o mesmo valor no webhook do
+   Sandbox apontando para `https://SEU-DOMINIO/api/webhooks/asaas`; prefira `NON_SEQUENTIALLY`.
 3. Mantenha `ASAAS_ENVIRONMENT=sandbox` e `ASAAS_BASE_URL=https://api-sandbox.asaas.com/v3`.
    Qualquer credencial/endpoint de produção é rejeitado pelo código.
 4. Rode `npm run dev`, entre como owner e abra `/dashboard/assinatura`.
@@ -336,10 +338,11 @@ npm test                 # unitários + integração (integração é ignorada s
 npm run test:e2e         # requer: npx playwright install chromium
 ```
 
-Situação atual: **306 testes Vitest aprovados** (29 arquivos), incluindo os testes de integração da
+Situação atual: **307 testes Vitest aprovados** (29 arquivos), incluindo os testes de integração da
 Fundação/cardápio, pedidos, entregas, rastreamento, assinaturas e cobrança Sandbox, executados com
-`SUPABASE_TEST_*`. Os 7 testes de cobrança usam RPCs reais com pagamentos **simulados**
-(`cus_test_*`, `sub_test_*`, `pay_test_*`); não são teste externo do Asaas. A suíte E2E tem
+`SUPABASE_TEST_*`. Os 8 testes de cobrança usam RPCs reais com pagamentos **simulados**
+(`cus_test_*`, `sub_test_*`, `pay_test_*`); o ciclo externo real foi validado separadamente no Asaas
+Sandbox (ver [docs/billing-sandbox.md](docs/billing-sandbox.md)). A suíte E2E tem
 **17/17** aprovados, incluindo os fluxos completos de pedidos (entrega e retirada/Pix), de entrega em
 mobile, de rastreamento em 13 passos com GPS simulado e do ciclo comercial (cadastro → teste →
 bloqueio → regularização), além da tela Sandbox e do formulário de faturamento. O detalhamento está
@@ -512,8 +515,8 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - Não há convite de equipe por token; o vínculo é feito pelo superadministrador com usuário já
   existente.
 - Não há gestão de funcionários na interface (apenas o modelo e as políticas).
-- Cobrança somente em **Asaas Sandbox**, com homologação externa parcial: sem credenciais reais, não
-  houve cobrança no Sandbox, confirmação simulada pelo provedor nem webhook externo de ponta a ponta.
+- Cobrança somente em **Asaas Sandbox**, homologada de ponta a ponta em 2026-11-04 (cobrança Pix,
+  confirmação simulada, webhook autenticado e liberação da loja). Não há ativação de produção.
 - Não há worker/fila/agendador de cobrança; webhooks são síncronos e a conciliação é manual
   (`npm run billing:reconcile`). Não há alerta automático de falha.
 - Cobrança por Pix é pagamento por ciclo, **não débito automático**. Não há cartão, nota fiscal,
@@ -536,7 +539,8 @@ Detalhes completos em [docs/security.md](docs/security.md).
   gestores validam apenas o MIME declarado e o limite do bucket.
 - Sem carrinho off-line ou sincronização entre dispositivos: o carrinho fica no `localStorage`.
 - Sem gateway de produção, cobrança automática em cartão, conciliação automática, impressão térmica,
-  cupom ou desconto. A integração Asaas Sandbox está implementada, mas não homologada externamente.
+  cupom ou desconto. A integração Asaas Sandbox está homologada no Sandbox, mas produção não foi
+  ativada.
 - Pix da assinatura é gerado no Asaas; o AVDelivery não marca pagamento sem consultar o provedor.
   Pix de pedido no checkout continua manual e independente da assinatura.
 - GPS web apenas em primeiro plano: com tela bloqueada ou navegador em segundo plano, o envio pode
@@ -569,10 +573,10 @@ Detalhes completos em [docs/security.md](docs/security.md).
 ## Próxima etapa recomendada
 
 As Etapas 1 a 4 estão homologadas, a Etapa 5 tem homologação web parcial, a Etapa 6A está
-implementada e a Etapa 6B está implementada com **homologação externa parcial** no Asaas Sandbox.
-Antes de avançar, concluir o roteiro de [docs/billing-sandbox.md](docs/billing-sandbox.md) com
-credenciais Sandbox e revisar [docs/billing-production-limits.md](docs/billing-production-limits.md).
-A Etapa 7 (endurecimento) e a ativação de produção não foram iniciadas. A recomendação de gateway
-continua em [docs/billing-providers.md](docs/billing-providers.md).
+implementada e a Etapa 6B está **homologada no Asaas Sandbox** (produção não ativada). Antes de
+avançar, revisar [docs/billing-production-limits.md](docs/billing-production-limits.md), decidir
+sobre worker de conciliação e URL estável de webhook, e fazer a revisão deliberada da trava
+Sandbox-only. A Etapa 7 (endurecimento) e a ativação de produção não foram iniciadas. A recomendação
+de gateway continua em [docs/billing-providers.md](docs/billing-providers.md).
 Antes de retomar rastreamento, recomenda-se validar o app Android em aparelho físico e decidir sobre
 iOS.

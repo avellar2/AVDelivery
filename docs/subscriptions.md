@@ -6,11 +6,12 @@ isenções, auditoria, onboarding e bloqueio de novas vendas. A Etapa 6B adicion
 faturamento, cliente/assinatura/cobrança externa, webhook autenticado, conciliação manual e
 tratamento de atraso/estorno/chargeback.
 
-> Status honesto: a Etapa 6B está **implementada e testada internamente, com homologação externa
-> parcial**. Nenhuma cobrança real foi criada. O ciclo externo no Asaas Sandbox (cobrança real,
-> confirmação simulada pelo provedor e webhook autenticado de ponta a ponta) não pôde ser executado
-> por ausência de credenciais. Ver [billing-sandbox.md](billing-sandbox.md). Só um pagamento
-> confirmado e verificado libera a loja; criar assinatura **não** libera.
+> Status: a Etapa 6B está **homologada no Asaas Sandbox (2026-11-04)**. O ciclo externo real —
+> assinatura Pix mensal de R$ 59,90, cobrança, confirmação simulada pelo provedor, webhook
+> autenticado e liberação transacional da loja — foi comprovado de ponta a ponta, incluindo
+> duplicidade, reenvio e conciliação. Nenhuma conta financeira foi criada, nenhum contrato foi
+> aceito e nenhum valor real foi movimentado. Ver [billing-sandbox.md](billing-sandbox.md). Só um
+> pagamento confirmado e verificado libera a loja; criar assinatura **não** libera.
 
 ## Plano de referência
 

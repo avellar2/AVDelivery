@@ -2,7 +2,7 @@
 
 Pesquisa realizada em **2026-11-04** para fundamentar a Etapa 6B. **Nenhuma conta foi aberta, nenhum
 contrato foi aceito e nenhuma cobrança real foi criada.** A Etapa 6B foi implementada com o Asaas,
-exclusivamente em Sandbox; a homologação externa está pendente de credenciais. Este documento não é
+exclusivamente em Sandbox, e homologada de ponta a ponta no Sandbox em 2026-11-04. Este documento não é
 uma promessa de preço, pois taxas mudam sem aviso e podem depender do volume, do meio de pagamento e
 de negociação comercial.
 

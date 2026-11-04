@@ -1,8 +1,19 @@
 # Webhooks do Asaas
 
 Endpoint: `POST /api/webhooks/asaas` (`src/app/api/webhooks/asaas/route.ts`, runtime Node.js,
-dinâmico). O Asaas é configurado no painel do Sandbox apontando para
-`https://SEU-DOMINIO/api/webhooks/asaas`, com o mesmo valor de `ASAAS_WEBHOOK_TOKEN`.
+dinâmico). O Asaas é configurado apontando para `https://SEU-DOMINIO/api/webhooks/asaas`, com o
+mesmo valor de `ASAAS_WEBHOOK_TOKEN`.
+
+Na homologação de 2026-11-04 o webhook foi registrado pela API oficial
+(`POST /v3/webhooks` no Sandbox) com 16 eventos, `enabled: true` e
+**`sendType: NON_SEQUENTIALLY`**. A entrega sequencial (`SEQUENTIALLY`) pode ficar bloqueada por um
+recurso desconhecido que responda `500`; `NON_SEQUENTIALLY` entrega cada evento de forma independente.
+Se um evento for de um recurso que o AVDelivery não conhece, ele é persistido como `failed` e o
+Asaas reenvia — não configure entrega sequencial dependente de um único recurso.
+
+Evidência real: `PAYMENT_CREATED` e `PAYMENT_RECEIVED` chegaram pelo túnel HTTPS, foram persistidos e
+processados, e o reenvio dos mesmos payloads retornou `200 {"duplicate":true}` sem efeitos
+duplicados. Ver [billing-sandbox.md](billing-sandbox.md).
 
 ## Autenticação
 

@@ -136,8 +136,9 @@ Essas operações são exclusivas de `service_role` e revalidam tudo no banco.
   webhook, CPF/CNPJ e perfil.
 - Integração real: perfil/RLS, checkout sem liberação, valor adulterado, cliente divergente,
   confirmação, duplicidade, concorrência, estorno, chargeback e reativação.
-- E2E: tela do owner com Sandbox explícito, formulário de faturamento e ausência de “Pagar agora”,
-  sem cobrança real quando não há credenciais.
+- E2E: tela do owner com Sandbox explícito, formulário de faturamento e ausência de “Pagar agora”.
+- Homologação externa: ciclo real no Asaas Sandbox (cobrança Pix, confirmação simulada, webhook
+  autenticado e liberação transacional), descrito em [billing-sandbox.md](billing-sandbox.md).
 
 Detalhes: [webhooks.md](webhooks.md), [billing-idempotency.md](billing-idempotency.md) e
 [billing-reconciliation.md](billing-reconciliation.md).

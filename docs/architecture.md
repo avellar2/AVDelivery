@@ -409,9 +409,9 @@ Vitest (23 arquivos) e 17 E2E, incluindo o ciclo comercial completo. Há plano, 
 carência, isenção, onboarding, auditoria e bloqueio de novas vendas. Ver
 [subscriptions.md](subscriptions.md).
 
-**Etapa 6B implementada com homologação externa parcial em 2026-11-04**: 3 migrações novas de schema
-e 3 migrações de correção (26 no total), 306 testes Vitest (29 arquivos, 62 novos de cobrança) e 17
-E2E. O fluxo Asaas Sandbox está implementado e testado com dados de pagamento simulados contra o
-Supabase real; **não houve cobrança real, conta ou contrato**, e o ciclo externo no Sandbox ficou
-pendente por ausência de `ASAAS_API_KEY`/`ASAAS_WEBHOOK_TOKEN`. Ver
+**Etapa 6B homologada no Asaas Sandbox em 2026-11-04**: 3 migrações novas de schema e 3 migrações de
+correção (26 no total), testes Vitest (unitários e integração real) e 17 E2E. O ciclo externo foi
+executado de ponta a ponta com cobrança Pix de Sandbox de R$ 59,90, confirmação simulada pelo
+provedor, webhook autenticado e liberação transacional da loja. **Não houve conta, contrato ou
+movimentação de dinheiro real**, e a produção permanece bloqueada pela trava Sandbox-only. Ver
 [billing-sandbox.md](billing-sandbox.md) e [billing-production-limits.md](billing-production-limits.md).

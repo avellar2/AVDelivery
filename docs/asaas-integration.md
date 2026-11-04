@@ -5,11 +5,14 @@ código**: credenciais ou endpoints de produção são rejeitados na inicializa�
 conta foi criada, nenhum contrato foi aceito e nenhuma cobrança real foi gerada durante a
 implementação.
 
-> **Homologação parcial.** O código está implementado e testado com mocks e com o banco real. Como
-> não havia credencial `ASAAS_API_KEY`/`ASAAS_WEBHOOK_TOKEN` no ambiente no momento da entrega, não
-> foi possível criar uma cobrança real no Sandbox, receber a confirmação simulada do Asaas nem
-> processar um webhook externo autenticado de ponta a ponta. Ver
-> [billing-sandbox.md](billing-sandbox.md).
+> **Homologada no Asaas Sandbox (2026-11-04).** O ciclo externo real foi executado de ponta a ponta:
+> cliente, assinatura Pix mensal de R$ 59,90, cobrança, confirmação simulada pelo endpoint oficial,
+> webhook autenticado e liberação transacional da loja. Ver
+> [billing-sandbox.md](billing-sandbox.md) e [homologation.md](homologation.md).
+
+> **Atenção ao `$` em `.env.local`.** Chaves do Asaas começam com `$` e o Next.js as interpreta como
+> interpolação de variável. Escreva `ASAAS_API_KEY=\$aact_...`. O Node (`--env-file`) mantém a barra
+> invertida, portanto `scripts/billing-reconcile.mjs` normaliza o valor antes de chamar o provedor.
 
 ## Variáveis de ambiente
 
@@ -42,6 +45,18 @@ Base: `https://api-sandbox.asaas.com/v3`, autenticação pelo header `access_tok
 | Pagamentos da assinatura | `GET /subscriptions/{id}/payments`     |
 | Consultar pagamento      | `GET /payments/{id}`                   |
 | QR Code Pix              | `GET /payments/{id}/pixQrCode`         |
+
+Endpoints administrativos usados apenas na homologação (não fazem parte do fluxo do aplicativo):
+
+| Operação                    | Método e caminho                       |
+| --------------------------- | -------------------------------------- |
+| Simular pagamento           | `POST /sandbox/payment/{id}/confirm`   |
+| Registrar/atualizar webhook | `POST /webhooks`, `PUT /webhooks/{id}` |
+| Consultar webhooks          | `GET /webhooks`                        |
+
+O webhook de homologação foi registrado com 16 eventos, `sendType: NON_SEQUENTIALLY`, `enabled:
+true` e `authToken` de 64 caracteres. `NON_SEQUENTIALLY` evita que uma entrega com erro bloqueie as
+demais na fila do provedor; ver [webhooks.md](webhooks.md).
 
 - `externalReference` do cliente e da assinatura é o UUID da loja. A associação local nunca usa um
   `store_id` recebido do webhook.

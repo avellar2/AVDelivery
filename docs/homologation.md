@@ -4,8 +4,8 @@
 
 **Etapas 1 e 2 homologadas em 2026-10-29; Etapas 3 e 4 homologadas em 2026-10-30; Etapa 5 com
 homologação parcial em 2026-10-31; Etapa 6A implementada e validada em 2026-11-04; Etapa 6B
-implementada em 2026-11-04 com HOMOLOGAÇÃO PARCIAL (sem acesso ao Asaas Sandbox)**, com um item de
-endurecimento não bloqueante pendente (proteção de senhas vazadas, configuração manual no painel).
+HOMOLOGADA NO ASAAS SANDBOX em 2026-11-04**, com um item de endurecimento não bloqueante pendente
+(proteção de senhas vazadas, configuração manual no painel).
 
 As Etapas 3, 4 e 5 foram validadas contra o projeto Supabase real de homologação, com migrações
 aplicadas, integração, E2E e revisão visual em desktop e mobile. Na Etapa 5, o GPS web em primeiro
@@ -933,13 +933,15 @@ Reprodução: os mesmos comandos da seção anterior (`db push`, `npm test`, `np
 `typecheck`, `lint`, `build`, `db lint`). O E2E comercial usa `SUPERADMIN_*` e `SUPABASE_TEST_*` e
 cria/remove suas próprias fixtures.
 
-## Homologação da Etapa 6B — Asaas Sandbox (parcial, 2026-11-04)
+## Homologação da Etapa 6B — Asaas Sandbox (2026-11-04)
 
 ### Status
 
-**HOMOLOGAÇÃO PARCIAL.** O código está implementado e testado, mas o ciclo externo real não foi
-executado porque não havia `ASAAS_API_KEY` nem `ASAAS_WEBHOOK_TOKEN` no ambiente. Nenhuma conta foi
-criada, nenhum contrato aceito e nenhuma cobrança real gerada.
+**HOMOLOGADA NO ASAAS SANDBOX.** O ciclo externo real foi executado de ponta a ponta:
+cliente → assinatura Pix mensal de R$ 59,90 → cobrança → confirmação simulada pelo endpoint
+oficial do Asaas → webhook autenticado → aplicação transacional no Supabase → fatura paga →
+assinatura ativa → loja liberada. Nenhuma conta financeira foi criada em nome do usuário, nenhum
+contrato foi aceito e nenhum valor real foi movimentado. A produção permanece intocada.
 
 ### Migrações aplicadas
 
@@ -956,11 +958,11 @@ total):
 ### Resultados reais
 
 - `npm run typecheck`, `npm run lint` e `npm run format:check`: aprovados.
-- `npm test -- --maxWorkers=2` (ou `npx vitest run --maxWorkers=2`): **306 testes, 29 arquivos,
+- `npm test -- --maxWorkers=2` (ou `npx vitest run --maxWorkers=2`): **307 testes, 29 arquivos,
   todos verdes**.
-- Testes novos de cobrança: 62 unitários + 7 de integração real contra Supabase
+- Testes novos de cobrança: 62 unitários + 8 de integração real contra Supabase
   (`tests/integration/billing.test.ts`), com cliente/assinatura/pagamento simulados
-  (`cus_test_*`, `sub_test_*`, `pay_test_*`) e RPCs reais.
+  (`cus_test_*`, `sub_test_*`, `pay_test_*`) e RPCs reais; inclui a regressão do checkout repetido.
 - `npm run build`: aprovado; a rota `ƒ /api/webhooks/asaas` foi gerada.
 - `npm run test:e2e`: **17 testes verdes**, incluindo a tela Sandbox e o formulário de faturamento.
 - `supabase db lint --linked`: **sem erros** após `20261104120400`.
@@ -985,17 +987,55 @@ total):
 - Chave única de webhook gera `23505` em duplicata.
 - `billing_apply_payment_event` recusa evento de outro cliente/assinatura/valor.
 
-### O que **não** foi comprovado
+### Ciclo externo real no Asaas Sandbox
 
-1. Criação real de cliente/assinatura/cobrança em `api-sandbox.asaas.com`.
-2. Geração e leitura de um Pix real do Sandbox.
-3. Pagamento simulado pelo próprio Asaas.
-4. Webhook externo autenticado percorrendo o ciclo completo até a ativação.
+Executado em `https://api-sandbox.asaas.com/v3` com credencial Sandbox, webhook público HTTPS
+(`cloudflared` quick tunnel) registrado pela API oficial (`POST /v3/webhooks`, 16 eventos,
+`sendType: NON_SEQUENTIALLY`, `enabled: true`) e token próprio aceito por Asaas (32–255 caracteres).
 
-O endpoint foi exercitado apenas de forma local/unitária (token, estrutura, tamanho) e responde
-`503` sem configuração. Ver [billing-sandbox.md](billing-sandbox.md).
+Evidências (ids reais do Sandbox):
 
-### Correções durante a implementação
+| Item                | Valor                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| Loja de homologação | `a9a7e8ab-9e5a-4749-8322-828145171acd` (`homologacao-6b-b-1793814695550`)             |
+| Assinatura Asaas    | `sub_3k5n4kxym59nb3r4` — `PIX`, `MONTHLY`, valor `59.9`, `ACTIVE`                     |
+| Cobrança Asaas      | `pay_ksux7zlqtgl15sp3` — `PIX`, valor `59.9`, confirmada para `RECEIVED`              |
+| Fatura AVDelivery   | `5990` centavos BRL, status `paid`, `paid_at = 2026-11-04T15:00:00+00:00`             |
+| Assinatura local    | `active`, `current_period_end = 2026-12-04T00:00:00+00:00`, carência até `2026-12-09` |
+| Acesso comercial    | `{ state: "active", hasAccess: true, storeActive: true }`                             |
+| Auditoria           | `payment_confirmed` em `2026-11-04T17:54:27Z` com payment id e fim do período         |
+
+Confirmação do pagamento: `POST /v3/sandbox/payment/{id}/confirm` (endpoint oficial de simulação do
+Sandbox), sem cartão e sem dinheiro real.
+
+### Webhook externo
+
+- `PAYMENT_CREATED` (`evt_05b708f961d739ea7eba7e4db318f621&24283350`) processado em
+  `2026-11-04T17:54:25Z`.
+- `PAYMENT_RECEIVED` (`evt_d26e303b238e509335ac9ba210e51b0f&24283367`) processado em
+  `2026-11-04T17:54:33Z`.
+- Reenvio dos dois payloads reais com token válido: HTTP `200`
+  `{"duplicate":true,"status":"processed"}`, período e `paid_at` inalterados.
+- Token inválido continua respondendo `401`; sem configuração, `503`.
+
+### Duplicidade, reenvio e conciliação
+
+- Entrega duplicada e reenvio não estendem o período nem repetem `payment_confirmed` (chave única
+  `event_id` na inbox durável).
+- `npm run billing:reconcile` (dry-run e execução completa): 1 pagamento confirmado, 1 estado
+  atualizado, nenhum período ou evento de auditoria duplicado; reexecução é estável.
+- Geração repetida da cobrança reutiliza a assinatura/checkout abertos: nenhuma assinatura ou
+  cobrança extra no Asaas e uma única linha em `billing_checkout_requests`.
+
+### O que permanece fora do escopo comprovado
+
+1. Produção — bloqueada por trava Sandbox-only; revisão deliberada antes de qualquer ativação.
+2. Cartão de crédito, nota fiscal, split e retenção automática.
+3. Worker/fila/agendador: a conciliação continua manual e reenviável.
+4. O endpoint público de homologação era um túnel efêmero (`trycloudflare.com`), já encerrado; um
+   deploy real precisa de URL estável.
+
+### Correções durante a implementação e a homologação
 
 - `billing_complete_checkout` gravava o id do plano na coluna `currency`; corrigido para ler
   `plans.currency`.
@@ -1008,19 +1048,28 @@ O endpoint foi exercitado apenas de forma local/unitária (token, estrutura, tam
   `payment.id`/`subscription.id`.
 - `db lint` apontava variável não usada; removida sem alterar comportamento.
 - Seletor E2E ambíguo em “Dados de faturamento”; ajustado para `heading`.
+- **Bug real encontrado na homologação:** ao clicar “Gerar cobrança” novamente,
+  `billing_begin_checkout` reutilizava a requisição aberta e devolvia outro `requestId`, mas o
+  serviço concluía com o id recém-gerado pela página e falhava com `checkout_not_found`.
+  `startOwnerCheckout` passou a usar o `requestId` devolvido pelo RPC em
+  `billing_complete_checkout`/`billing_fail_checkout`, com teste de regressão em
+  `tests/integration/billing.test.ts`.
+- Webhook em `SEQUENTIALLY` ficava bloqueado por recursos desconhecidos respondendo `500`; a
+  assinatura de homologação foi atualizada para `NON_SEQUENTIALLY` e o comportamento foi
+  documentado em [webhooks.md](webhooks.md).
 
 ### Revisão visual
 
-A tela `/dashboard/assinatura` foi validada em E2E: aviso explícito de Sandbox, ausência de “Pagar
-agora” e de “Marcar como paga”, formulário de faturamento, botão de cobrança presente e desabilitado
-sem configuração, estado e histórico preservados. Nenhum segredo é exibido.
+A tela `/dashboard/assinatura` foi validada em E2E e em navegador real contra o Sandbox: aviso
+explícito de Sandbox, ausência de “Pagar agora” e de “Marcar como paga”, formulário de faturamento,
+link/Pix da cobrança, estado da assinatura e “Verificar pagamento”. Nenhum segredo é exibido.
 
 ### Pendências e limitações
 
-- Homologação externa no Sandbox (itens 1–4 acima).
 - Sem worker/fila/agendador; conciliação manual.
 - Sem cartão, nota fiscal, split, retenção automática ou notificações de cobrança.
 - Trava Sandbox-only precisa de revisão deliberada antes de produção.
+- Endpoint público de homologação era um túnel efêmero; produção exige URL estável.
 - Ver [billing-production-limits.md](billing-production-limits.md) e [billing-costs.md](billing-costs.md).
 
 ### Critérios de aceite da Etapa 6B
@@ -1035,7 +1084,10 @@ sem configuração, estado e histórico preservados. Nenhum segredo é exibido.
 - [x] Conciliação reenviável e auditável.
 - [x] Testes unitários, integração real e E2E; suítes anteriores verdes.
 - [x] Documentação criada e atualizada; segredos não commitados.
-- [ ] Cobrança real no Asaas Sandbox, confirmação do provedor e webhook externo de ponta a ponta.
+- [x] Cobrança real no Asaas Sandbox, confirmação do provedor e webhook externo de ponta a ponta.
 - [ ] Produção — explicitamente fora desta etapa.
 
-**Conclusão: HOMOLOGAÇÃO PARCIAL**, conforme o critério da missão.
+**Conclusão: ETAPA 6B HOMOLOGADA NO ASAAS SANDBOX.** O fluxo externo completo funcionou com
+cobrança Pix real de Sandbox, confirmação simulada pelo provedor, webhook autenticado e liberação
+transacional da loja, com duplicidade, reenvio e conciliação comprovados. A produção não foi
+alterada e continua bloqueada pela trava Sandbox-only.

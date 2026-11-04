@@ -28,7 +28,11 @@ vez.
 3. `startOwnerCheckout` procura cliente e assinatura externa antes de criar. Se existir assinatura
    `ACTIVE` com `externalReference = store_id`, reutiliza; caso contrário cria **uma** assinatura.
 4. `billing_complete_checkout` grava referências externas, fatura pendente e o link/Pix, e marca a
-   requisição como `created`. Repetir com a mesma `request_id` devolve o mesmo resultado.
+   requisição como `created`. Quando `billing_begin_checkout` **reutiliza** uma requisição aberta, ele
+   devolve o `requestId` dela; o serviço precisa concluir/falhar com **esse** id, não com o UUID
+   recém-gerado pela página. Usar o id novo terminava em `checkout_not_found` na segunda tentativa —
+   bug encontrado na homologação e coberto por teste de regressão em
+   `tests/integration/billing.test.ts`. Repetir com a mesma `request_id` devolve o mesmo resultado.
 5. Se o Asaas falhar antes da criação, `billing_fail_checkout` registra `failed` e a próxima tentativa
    pode criar uma nova requisição. Se já existir assinatura externa ativa, ela é reutilizada.
 

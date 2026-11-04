@@ -208,11 +208,13 @@ pagamento. Ver [subscriptions.md](subscriptions.md).
 Critério de pronto: **atendido** — uma loja sem acesso comercial entra em modo restrito, mantém
 todos os dados e volta a vender após regularização administrativa.
 
-## Etapa 6B — Cobrança recorrente com Asaas Sandbox (implementada; homologação externa parcial em 2026-11-04)
+## Etapa 6B — Cobrança recorrente com Asaas Sandbox (homologada no Sandbox em 2026-11-04)
 
-> **Implementada e testada internamente, sem homologação externa completa.** O ciclo real no Asaas
-> Sandbox (cobrança, confirmação simulada e webhook autenticado) não foi executado por ausência de
-> `ASAAS_API_KEY`/`ASAAS_WEBHOOK_TOKEN`. Ver [billing-sandbox.md](billing-sandbox.md).
+> **Homologada no Asaas Sandbox.** O ciclo externo real — cliente, assinatura Pix mensal, cobrança
+> de R$ 59,90, confirmação simulada pelo endpoint oficial, webhook autenticado e liberação
+> transacional da loja — foi executado de ponta a ponta, com duplicidade, reenvio e conciliação
+> comprovados. A produção permanece intocada e bloqueada pela trava Sandbox-only. Ver
+> [billing-sandbox.md](billing-sandbox.md) e [homologation.md](homologation.md).
 
 Entregue:
 
@@ -232,14 +234,15 @@ Entregue:
       Sandbox e sem botão “Pagar agora”.
 - [x] Testes unitários, integração real com pagamentos simulados e E2E; suítes anteriores verdes.
 - [x] Migrações aplicadas em `jtryfpaxocdiqrehptlz`, `db lint` limpo e advisors revisados.
+- [x] Homologação externa no Asaas Sandbox: cobrança Pix real, confirmação do provedor, webhook
+      autenticado, duplicidade/reenvio idempotentes e conciliação reenviável.
 
 Fora do escopo: produção, cartão, nota fiscal, worker/fila, autoatendimento de troca de plano,
 notificações de cobrança e contratação/aceite de contrato. Ver
 [billing-production-limits.md](billing-production-limits.md) e [billing-costs.md](billing-costs.md).
 
-Critério de pronto: **parcialmente atendido** — o fluxo está implementado e comprovado com dados
-simulados; falta a cobrança real no Sandbox, a confirmação do provedor e o webhook externo de ponta a
-ponta.
+Critério de pronto: **atendido no Asaas Sandbox** — ciclo externo completo comprovado de ponta a
+ponta. Produção continua explicitamente fora do escopo desta etapa.
 
 ## Etapa 7 — Endurecimento
 
