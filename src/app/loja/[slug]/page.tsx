@@ -7,6 +7,7 @@ import { Storefront } from "@/components/storefront/storefront";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { getPublicMenu } from "@/modules/menu/service";
 import { getPublicStoreBySlug } from "@/modules/stores/service";
+import { getCommercialStatusBySlug } from "@/modules/subscriptions/service";
 
 export async function generateMetadata({
   params,
@@ -49,7 +50,10 @@ export default async function PublicStorePage({ params }: { params: Promise<{ sl
   }
 
   const { slug } = await params;
-  const menu = await getPublicMenu(slug);
+  const [menu, commercial] = await Promise.all([
+    getPublicMenu(slug),
+    getCommercialStatusBySlug(slug),
+  ]);
 
   if (!menu) {
     notFound();
@@ -57,7 +61,11 @@ export default async function PublicStorePage({ params }: { params: Promise<{ sl
 
   return (
     <div className="min-h-screen bg-zinc-50">
-      <Storefront store={menu.store} categories={menu.categories} />
+      <Storefront
+        store={menu.store}
+        categories={menu.categories}
+        hasCommercialAccess={commercial?.hasAccess ?? false}
+      />
     </div>
   );
 }

@@ -3,8 +3,9 @@
 ## Status
 
 **Etapas 1 e 2 homologadas em 2026-10-29; Etapas 3 e 4 homologadas em 2026-10-30; Etapa 5 com
-homologação parcial em 2026-10-31**, com um item de endurecimento não bloqueante pendente (proteção
-de senhas vazadas, configuração manual no painel).
+homologação parcial em 2026-10-31; Etapa 6A implementada e validada em 2026-11-04; Etapa 6B
+HOMOLOGADA NO ASAAS SANDBOX em 2026-11-04**, com um item de endurecimento não bloqueante pendente
+(proteção de senhas vazadas, configuração manual no painel).
 
 As Etapas 3, 4 e 5 foram validadas contra o projeto Supabase real de homologação, com migrações
 aplicadas, integração, E2E e revisão visual em desktop e mobile. Na Etapa 5, o GPS web em primeiro
@@ -160,7 +161,9 @@ habilitado no dashboard (Authentication > Password Security). Não bloqueia a ho
 
 ## Dados de homologação preservados no projeto de testes
 
-- 2 lojas ativas: `burger-homologacao`, `pizza-homologacao`;
+- 4 lojas no projeto: `burger-homologacao`, `pizza-homologacao`, `stage5c-a` e `stage5c-b` —
+  as duas primeiras demo e as duas últimas fixtures da validação Android. As lojas preexistentes à
+  Etapa 6A receberam assinatura `active` isenta, registrada como `grandfathered`.
 - 4 vínculos `owner` (2 originais + 2 contas dedicadas de teste);
 - 2 superadministradores;
 - 6 perfis.
@@ -819,3 +822,272 @@ Critérios completos para declarar homologação física em
 - [x] Suítes, typecheck, lint, Prettier, build Next.js e build Android aprovados.
 - [ ] Homologação em aparelho físico Android com GNSS real e tela bloqueada prolongada.
 - [ ] Execução em Android 14 ou superior em aparelho real.
+
+## Etapa 6A — Administração comercial e assinaturas
+
+**Status: implementada e validada em 2026-11-04 no projeto de homologação, sem cobrança real.**
+
+Nenhum gateway foi contratado, nenhuma cobrança foi emitida e nenhum botão de pagamento foi
+publicado. A Etapa 6 (cobrança) permanece incompleta até a Etapa 6B. Nenhum `reset` remoto foi
+executado, nenhuma migração já aplicada foi editada e nenhum dado de produção foi acessado.
+
+### Migrações aplicadas
+
+Aplicadas via `supabase db push --linked`, em ordem, sem `reset`:
+
+1. `20261104090000_subscriptions_schema.sql` — enums, `plans`, `subscriptions`, `invoices` e
+   `subscription_events`; seed do plano `avdelivery` (R$ 59,90, trial 7, carência 5).
+2. `20261104090100_subscriptions_security.sql` — RLS, grants e políticas de leitura.
+3. `20261104090200_subscriptions_functions.sql` — estado efetivo, acesso comercial, onboarding,
+   administração, vínculo de owner e trigger de bloqueio de novos pedidos.
+4. `20261104090300_subscriptions_backfill.sql` — isenção explícita das lojas preexistentes e evento
+   `grandfathered`.
+5. `20261104090400_subscriptions_functions_fix.sql` — correção de lint (variável não usada).
+6. `20261104090500_subscription_events_cascade_fix.sql` — permite `DELETE` em cascata dos eventos
+   quando a loja é removida, sem abrir atualização ou exclusão avulsa.
+
+### Resultados reais
+
+- Migrações aplicadas e confirmadas no histórico remoto.
+- **237 testes Vitest aprovados em 23 arquivos**, incluindo 20 unitários e 10 de integração novos
+  de assinaturas executados contra o Supabase real.
+- **17/17 testes Playwright aprovados**, incluindo o novo fluxo comercial completo.
+- `npm run typecheck`, `npm run lint`, Prettier e `npm run build` aprovados.
+- `supabase db lint --linked` sem erros; advisors revisados.
+- Suítes anteriores (Fundação, cardápio, pedidos, entregas, rastreamento, Android) mantidas verdes.
+
+### Fluxo completo validado (E2E)
+
+1. Superadministrador cria o estabelecimento em `/admin/lojas/nova`.
+2. Assinatura `trialing`, vínculo `owner` e evento `store_created` são persistidos de verdade.
+3. Proprietário entra no painel e vê `/dashboard/assinatura` com plano, teste e **sem** “Pagar
+   agora”.
+4. A loja aceita pedidos durante o teste.
+5. O fim do teste/carência é simulado atualizando as datas da assinatura — sem alterar o relógio do
+   banco e sem `sleep` longo.
+6. Vitrine, painel e tela de assinatura passam a indicar bloqueio; o checkout é desabilitado.
+7. Superadministrador regulariza com motivo; evento administrativo é gravado.
+8. A loja volta a aceitar pedidos e o alerta desaparece.
+
+Fixtures criadas pelo teste são removidas no `finally`, inclusive usuário e loja.
+
+### Segurança e concorrência verificadas
+
+- RLS habilitada nas quatro tabelas; `anon` só lê o status comercial público pelo slug.
+- Owner lê a própria assinatura/faturas, mas não escreve; escrita direta retorna `42501`.
+- RPCs administrativas exigem `platform_admins`; usuário comum recebe `forbidden`.
+- Criação concorrente com o mesmo slug: uma requisição vence, a outra falha de forma controlada.
+- Repetição da mesma criação/ação com `request_id` não duplica registros nem eventos.
+- Eventos de assinatura são imutáveis; atualização e exclusão avulsa são bloqueadas.
+- Fatura `paid` sem `paid_at` e referência externa duplicada são rejeitadas.
+- O último owner da loja não pode ser removido.
+- Pedidos são bloqueados no `INSERT`, preservando pedidos já aceitos e o comportamento idempotente.
+- `service_role` não é usada no navegador; segredos permanecem em `.env.local`.
+
+### Revisão visual
+
+Capturas em desktop e mobile confirmaram: lista administrativa com métricas e paginação, formulário
+de cadastro, detalhe da loja com ações/histórico, painel de assinatura do owner, vitrine em teste e
+em vencimento, avisos de bloqueio e estado vazio de faturas. Nenhum botão de pagamento aparece.
+
+### Correções durante a implementação
+
+- Conflito entre imutabilidade dos eventos e `ON DELETE CASCADE` ao remover loja: resolvido com a
+  migração `20261104090500`, que permite exclusão apenas quando a loja já não existe.
+- Tipagem do detalhe administrativo: removida referência a campo de isenção não retornado pela RPC;
+  o motivo permanece visível no histórico de eventos.
+- Teste de integração de admin não autorizado chamava a RPC de criação; corrigido para chamar
+  diretamente a RPC proibida.
+- Fixture de vencimento precisava atualizar início e fim do teste para respeitar o `CHECK`.
+- Seletores E2E ambíguos (“Ação”/“Motivo”) e paginação após execuções repetidas foram ajustados; a
+  busca por nome no teste de homologação elimina dependência da ordem.
+- Restos de fixtures de execuções anteriores foram removidos após confirmar que eram literais de
+  teste, sem tocar as quatro lojas preservadas.
+
+### Pendências e limitações da Etapa 6A
+
+- **Sem cobrança real**: gateway, webhooks, conciliação, estorno, chargeback e nota fiscal.
+- Sem botão de pagamento e sem coleta de dados de cartão.
+- Sem emissão automática de faturas; faturas são administrativas e o estado vazio é honesto.
+- Sem job/cron noturno: o estado é derivado das datas, então a transição é calculada no acesso.
+- Sem convite de equipe por token; o owner precisa existir no Auth.
+- Feature gating por plano (limites de produtos/usuários) não foi implementado nesta etapa.
+- A recomendação de gateway em [billing-providers.md](billing-providers.md) precisa de validação
+  comercial e contratação; taxas não verificadas estão marcadas como tal.
+
+### Critérios de aceite da Etapa 6A
+
+- [x] Superadministrador cria e gerencia estabelecimentos pela interface, sem script.
+- [x] Plano de referência em centavos, trial e carência configuráveis.
+- [x] Estados comerciais e isenção explícita e auditada.
+- [x] Lojas preexistentes preservadas sem isenção silenciosa para lojas futuras.
+- [x] Assinatura, faturas e eventos com RLS e imutabilidade.
+- [x] Painel administrativo com métricas, busca, filtros e paginação.
+- [x] Painel do proprietário sem botão de pagamento.
+- [x] Bloqueio de **novos** pedidos no banco, com dados e pedidos antigos preservados.
+- [x] Testes unitários, de integração real e E2E completos, sem regressão nas suítes anteriores.
+- [x] Nenhum gateway contratado, nenhuma cobrança real e nenhuma credencial exposta.
+- [ ] Cobrança real e conciliação — explicitamente fora da 6A, pendente para a 6B.
+
+Reprodução: os mesmos comandos da seção anterior (`db push`, `npm test`, `npm run test:e2e`,
+`typecheck`, `lint`, `build`, `db lint`). O E2E comercial usa `SUPERADMIN_*` e `SUPABASE_TEST_*` e
+cria/remove suas próprias fixtures.
+
+## Homologação da Etapa 6B — Asaas Sandbox (2026-11-04)
+
+### Status
+
+**HOMOLOGADA NO ASAAS SANDBOX.** O ciclo externo real foi executado de ponta a ponta:
+cliente → assinatura Pix mensal de R$ 59,90 → cobrança → confirmação simulada pelo endpoint
+oficial do Asaas → webhook autenticado → aplicação transacional no Supabase → fatura paga →
+assinatura ativa → loja liberada. Nenhuma conta financeira foi criada em nome do usuário, nenhum
+contrato foi aceito e nenhum valor real foi movimentado. A produção permanece intocada.
+
+### Migrações aplicadas
+
+Aplicadas via `supabase db push --linked`, sem `reset` e sem alterar migrações anteriores (26 no
+total):
+
+1. `20261104120000_billing_schema.sql`
+2. `20261104120100_billing_security.sql`
+3. `20261104120200_billing_functions.sql`
+4. `20261104120300_billing_preserve_paid_at.sql`
+5. `20261104120400_billing_lint_cleanup.sql`
+6. `20261104120500_billing_checkout_amount_guard.sql`
+
+### Resultados reais
+
+- `npm run typecheck`, `npm run lint` e `npm run format:check`: aprovados.
+- `npm test -- --maxWorkers=2` (ou `npx vitest run --maxWorkers=2`): **307 testes, 29 arquivos,
+  todos verdes**.
+- Testes novos de cobrança: 62 unitários + 8 de integração real contra Supabase
+  (`tests/integration/billing.test.ts`), com cliente/assinatura/pagamento simulados
+  (`cus_test_*`, `sub_test_*`, `pay_test_*`) e RPCs reais; inclui a regressão do checkout repetido.
+- `npm run build`: aprovado; a rota `ƒ /api/webhooks/asaas` foi gerada.
+- `npm run test:e2e`: **17 testes verdes**, incluindo a tela Sandbox e o formulário de faturamento.
+- `supabase db lint --linked`: **sem erros** após `20261104120400`.
+- `supabase db advisors --linked`: avisos residuais revisados; os novos são as funções
+  `owner_get_billing_profile`/`owner_upsert_billing_profile`, intencionais para o owner e protegidas
+  por `auth.uid()` + papel. O aviso de `admin_list_store_billing` já existia na 6A.
+- Nenhuma loja preexistente foi removida; as fixtures dos testes são criadas e apagadas no `afterAll`.
+
+### O que foi comprovado no banco real
+
+- RLS: owner vê somente o próprio perfil/checkout; outro owner recebe `forbidden`; escrita direta é
+  negada; `billing_webhook_events` não é legível por `authenticated`.
+- RPCs de serviço não são executáveis pelo owner.
+- Checkout cria assinatura externa e fatura pendente **sem** liberar a loja.
+- Valor adulterado, cliente divergente e assinatura desconhecida são recusados sem alterar dados.
+- Pagamento confirmado grava `paid`, `paid_at`, período e `active`, libera a loja e registra
+  `payment_confirmed` uma única vez.
+- Evento duplicado/atrasado não rebaixa `paid`, não muda `paid_at` e não estende o período.
+- Confirmações concorrentes não duplicam período/evento.
+- Estorno cancela o acesso do período vigente; confirmação atrasada não reativa.
+- Chargeback é registrado; atraso e reativação por novo pagamento funcionam.
+- Chave única de webhook gera `23505` em duplicata.
+- `billing_apply_payment_event` recusa evento de outro cliente/assinatura/valor.
+
+### Ciclo externo real no Asaas Sandbox
+
+Executado em `https://api-sandbox.asaas.com/v3` com credencial Sandbox, webhook público HTTPS
+(`cloudflared` quick tunnel) registrado pela API oficial (`POST /v3/webhooks`, 16 eventos,
+`sendType: NON_SEQUENTIALLY`, `enabled: true`) e token próprio aceito por Asaas (32–255 caracteres).
+
+Evidências (ids reais do Sandbox):
+
+| Item                | Valor                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| Loja de homologação | `a9a7e8ab-9e5a-4749-8322-828145171acd` (`homologacao-6b-b-1793814695550`)             |
+| Assinatura Asaas    | `sub_3k5n4kxym59nb3r4` — `PIX`, `MONTHLY`, valor `59.9`, `ACTIVE`                     |
+| Cobrança Asaas      | `pay_ksux7zlqtgl15sp3` — `PIX`, valor `59.9`, confirmada para `RECEIVED`              |
+| Fatura AVDelivery   | `5990` centavos BRL, status `paid`, `paid_at = 2026-11-04T15:00:00+00:00`             |
+| Assinatura local    | `active`, `current_period_end = 2026-12-04T00:00:00+00:00`, carência até `2026-12-09` |
+| Acesso comercial    | `{ state: "active", hasAccess: true, storeActive: true }`                             |
+| Auditoria           | `payment_confirmed` em `2026-11-04T17:54:27Z` com payment id e fim do período         |
+
+Confirmação do pagamento: `POST /v3/sandbox/payment/{id}/confirm` (endpoint oficial de simulação do
+Sandbox), sem cartão e sem dinheiro real.
+
+### Webhook externo
+
+- `PAYMENT_CREATED` (`evt_05b708f961d739ea7eba7e4db318f621&24283350`) processado em
+  `2026-11-04T17:54:25Z`.
+- `PAYMENT_RECEIVED` (`evt_d26e303b238e509335ac9ba210e51b0f&24283367`) processado em
+  `2026-11-04T17:54:33Z`.
+- Reenvio dos dois payloads reais com token válido: HTTP `200`
+  `{"duplicate":true,"status":"processed"}`, período e `paid_at` inalterados.
+- Token inválido continua respondendo `401`; sem configuração, `503`.
+
+### Duplicidade, reenvio e conciliação
+
+- Entrega duplicada e reenvio não estendem o período nem repetem `payment_confirmed` (chave única
+  `event_id` na inbox durável).
+- `npm run billing:reconcile` (dry-run e execução completa): 1 pagamento confirmado, 1 estado
+  atualizado, nenhum período ou evento de auditoria duplicado; reexecução é estável.
+- Geração repetida da cobrança reutiliza a assinatura/checkout abertos: nenhuma assinatura ou
+  cobrança extra no Asaas e uma única linha em `billing_checkout_requests`.
+
+### O que permanece fora do escopo comprovado
+
+1. Produção — bloqueada por trava Sandbox-only; revisão deliberada antes de qualquer ativação.
+2. Cartão de crédito, nota fiscal, split e retenção automática.
+3. Worker/fila/agendador: a conciliação continua manual e reenviável.
+4. O endpoint público de homologação era um túnel efêmero (`trycloudflare.com`), já encerrado; um
+   deploy real precisa de URL estável.
+
+### Correções durante a implementação e a homologação
+
+- `billing_complete_checkout` gravava o id do plano na coluna `currency`; corrigido para ler
+  `plans.currency`.
+- Estorno de período antigo cancelava o acesso vigente; a condição foi restringida ao período atual.
+- `startOwnerCheckout` podia criar duas assinaturas; passou a procurar/reutilizar uma assinatura
+  `ACTIVE` e criar no máximo uma.
+- Evento `PENDING` atrasado reescrevia `paid_at`; corrigido em migração própria para preservar o
+  primeiro instante de liquidação.
+- Webhook podia tratar um `PAYMENT_*` malformado como assinatura; o parser passou a exigir
+  `payment.id`/`subscription.id`.
+- `db lint` apontava variável não usada; removida sem alterar comportamento.
+- Seletor E2E ambíguo em “Dados de faturamento”; ajustado para `heading`.
+- **Bug real encontrado na homologação:** ao clicar “Gerar cobrança” novamente,
+  `billing_begin_checkout` reutilizava a requisição aberta e devolvia outro `requestId`, mas o
+  serviço concluía com o id recém-gerado pela página e falhava com `checkout_not_found`.
+  `startOwnerCheckout` passou a usar o `requestId` devolvido pelo RPC em
+  `billing_complete_checkout`/`billing_fail_checkout`, com teste de regressão em
+  `tests/integration/billing.test.ts`.
+- Webhook em `SEQUENTIALLY` ficava bloqueado por recursos desconhecidos respondendo `500`; a
+  assinatura de homologação foi atualizada para `NON_SEQUENTIALLY` e o comportamento foi
+  documentado em [webhooks.md](webhooks.md).
+
+### Revisão visual
+
+A tela `/dashboard/assinatura` foi validada em E2E e em navegador real contra o Sandbox: aviso
+explícito de Sandbox, ausência de “Pagar agora” e de “Marcar como paga”, formulário de faturamento,
+link/Pix da cobrança, estado da assinatura e “Verificar pagamento”. Nenhum segredo é exibido.
+
+### Pendências e limitações
+
+- Sem worker/fila/agendador; conciliação manual.
+- Sem cartão, nota fiscal, split, retenção automática ou notificações de cobrança.
+- Trava Sandbox-only precisa de revisão deliberada antes de produção.
+- Endpoint público de homologação era um túnel efêmero; produção exige URL estável.
+- Ver [billing-production-limits.md](billing-production-limits.md) e [billing-costs.md](billing-costs.md).
+
+### Critérios de aceite da Etapa 6B
+
+- [x] Cliente Asaas Sandbox server-side com timeout, retry, validação e trava de produção.
+- [x] Perfil mínimo, validação e isolamento por loja.
+- [x] Assinatura/cobrança externa com referências únicas e centavos.
+- [x] Criar assinatura **não** libera a loja.
+- [x] Webhook autenticado, durável, idempotente e baseado no estado do provedor.
+- [x] Valor/moeda/cliente/assinatura revalidados; proprietário não marca fatura paga.
+- [x] Atraso, carência, estorno, chargeback e reativação tratados.
+- [x] Conciliação reenviável e auditável.
+- [x] Testes unitários, integração real e E2E; suítes anteriores verdes.
+- [x] Documentação criada e atualizada; segredos não commitados.
+- [x] Cobrança real no Asaas Sandbox, confirmação do provedor e webhook externo de ponta a ponta.
+- [ ] Produção — explicitamente fora desta etapa.
+
+**Conclusão: ETAPA 6B HOMOLOGADA NO ASAAS SANDBOX.** O fluxo externo completo funcionou com
+cobrança Pix real de Sandbox, confirmação simulada pelo provedor, webhook autenticado e liberação
+transacional da loja, com duplicidade, reenvio e conciliação comprovados. A produção não foi
+alterada e continua bloqueada pela trava Sandbox-only.

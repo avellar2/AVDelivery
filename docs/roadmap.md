@@ -176,21 +176,73 @@ distância, ETA, aplicativo nativo e mapa no painel da loja.
 Critério de pronto: **parcialmente atendido** — o GPS web em primeiro plano foi validado de ponta a
 ponta; o segundo plano depende de app nativo/híbrido e de teste em dispositivo físico.
 
-## Etapa 6 — Assinatura e cobrança
+## Etapa 6A — Administração comercial, onboarding e fundação de assinaturas (implementada em 2026-11-04)
 
-Objetivo: monetizar por estabelecimento.
+> **Implementada e validada em projeto de homologação**, sem cobrança real. A Etapa 6 continua
+> **incompleta** até a Etapa 6B integrar um gateway e validar pagamento de verdade.
 
-Escopo:
+Objetivo: controlar o acesso comercial de cada estabelecimento e permitir o onboarding sem depender
+de scripts.
 
-- Tabelas `plans`, `subscriptions`, `invoices`, `subscription_events`.
-- Integração com gateway (a definir) usando webhooks assinados.
-- Trial, carência, suspensão lógica e reativação de loja.
-- Feature gating por plano (ex.: número de produtos, usuários e lojas).
-- Painel do superadministrador com inadimplência e status.
-- Idempotência de webhooks e reconciliação.
-- Testes de webhook, assinatura e bloqueio/liberação.
+Entregue:
 
-Critério de pronto: uma loja sem assinatura ativa entra em modo restrito sem perder dados.
+- [x] Migrações de `plans`, `subscriptions`, `invoices` e `subscription_events` com RLS e auditoria
+      imutável.
+- [x] Plano `avdelivery` a R$ 59,90/mês em centavos, com trial de 7 dias e carência de 5 dias
+      configuráveis.
+- [x] Estados efetivos `trialing`, `active`, `grace`, `expired`, `canceled`, `exempt`, `missing` e
+      `inactive`, com datas de fim inclusivas.
+- [x] Isenção explícita e auditada; lojas preexistentes migradas como `grandfathered`, sem isenção
+      automática para lojas futuras.
+- [x] Onboarding transacional em `/admin/lojas/nova`, com proteção contra corrida de slug.
+- [x] Vínculo de proprietário por e-mail, preservando o último owner e sem cadastro público.
+- [x] Painel `/admin` com métricas, MRR, busca, filtro e paginação; detalhe em `/admin/lojas/[id]`.
+- [x] Painel do proprietário em `/dashboard/assinatura`, sem botão de pagamento.
+- [x] Função central de acesso comercial e trigger que bloqueia **novos** pedidos sem apagar dados.
+- [x] 20 testes unitários, 10 de integração e 1 E2E do fluxo completo; suítes anteriores mantidas.
+- [x] Migrações aplicadas no projeto `jtryfpaxocdiqrehptlz`, `db lint` e advisors revisados.
+
+Fora do escopo desta etapa: cobrança real, gateway, webhooks, nota fiscal, estorno e botão de
+pagamento. Ver [subscriptions.md](subscriptions.md).
+
+Critério de pronto: **atendido** — uma loja sem acesso comercial entra em modo restrito, mantém
+todos os dados e volta a vender após regularização administrativa.
+
+## Etapa 6B — Cobrança recorrente com Asaas Sandbox (homologada no Sandbox em 2026-11-04)
+
+> **Homologada no Asaas Sandbox.** O ciclo externo real — cliente, assinatura Pix mensal, cobrança
+> de R$ 59,90, confirmação simulada pelo endpoint oficial, webhook autenticado e liberação
+> transacional da loja — foi executado de ponta a ponta, com duplicidade, reenvio e conciliação
+> comprovados. A produção permanece intocada e bloqueada pela trava Sandbox-only. Ver
+> [billing-sandbox.md](billing-sandbox.md) e [homologation.md](homologation.md).
+
+Entregue:
+
+- [x] Cliente Asaas server-side com timeout, retry/backoff, validação Zod, conversão segura de
+      centavos e erros sem segredos.
+- [x] Trava **Sandbox-only** que rejeita credencial, ambiente e endpoint de produção.
+- [x] Perfil de faturamento mínimo do owner, validado no servidor e isolado por loja.
+- [x] Cliente/assinatura/cobrança externa com referências únicas e migrações sem `reset`.
+- [x] Checkout idempotente que cria assinatura Pix mensal e primeira cobrança **sem liberar a loja**.
+- [x] Webhook `POST /api/webhooks/asaas` com `asaas-access-token` em tempo constante, limite de
+      payload, persistência durável, deduplicação e consulta autoritativa ao provedor.
+- [x] Aplicação transacional que valida loja, cliente, assinatura, valor exato do plano, moeda e
+      transições; libera somente após pagamento confirmado.
+- [x] Tratamento de atraso, carência de 5 dias, estorno, chargeback, reativação e evento atrasado.
+- [x] Conciliação manual reenviável (`npm run billing:reconcile`) sem inventar worker/agendador.
+- [x] Tela `/dashboard/assinatura` com perfil, valor, estado, histórico, link/Pix, aviso explícito de
+      Sandbox e sem botão “Pagar agora”.
+- [x] Testes unitários, integração real com pagamentos simulados e E2E; suítes anteriores verdes.
+- [x] Migrações aplicadas em `jtryfpaxocdiqrehptlz`, `db lint` limpo e advisors revisados.
+- [x] Homologação externa no Asaas Sandbox: cobrança Pix real, confirmação do provedor, webhook
+      autenticado, duplicidade/reenvio idempotentes e conciliação reenviável.
+
+Fora do escopo: produção, cartão, nota fiscal, worker/fila, autoatendimento de troca de plano,
+notificações de cobrança e contratação/aceite de contrato. Ver
+[billing-production-limits.md](billing-production-limits.md) e [billing-costs.md](billing-costs.md).
+
+Critério de pronto: **atendido no Asaas Sandbox** — ciclo externo completo comprovado de ponta a
+ponta. Produção continua explicitamente fora do escopo desta etapa.
 
 ## Etapa 7 — Endurecimento
 
@@ -205,10 +257,10 @@ Critério de pronto: uma loja sem assinatura ativa entra em modo restrito sem pe
 
 ## Backlog técnico prioritário
 
-1. **UI administrativa** para criar lojas, usuários e vínculos (hoje só por script).
-2. **Convites de equipe** com token de uso único, em vez de inserir usuário por UUID.
+1. ~~**UI administrativa** para criar lojas, usuários e vínculos~~ — concluído na Etapa 6A.
+2. **Convites de equipe** com token de uso único, em vez de vincular usuário existente por e-mail.
 3. **Geração automática de tipos** do Supabase no CI.
-4. **Paginação e busca** na lista administrativa.
+4. ~~**Paginação e busca** na lista administrativa~~ — concluído na Etapa 6A.
 5. **Renderização do logo** com validação de domínio de imagem.
 6. **Política de troca de slug** (alias/redirect) para não quebrar links públicos.
 7. **Testes E2E autenticados** com projeto Supabase de teste e storage state do Playwright.

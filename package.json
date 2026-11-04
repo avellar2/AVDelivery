@@ -16,6 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "bootstrap:superadmin": "node --env-file-if-exists=.env.local scripts/bootstrap-superadmin.mjs",
+    "billing:reconcile": "node --env-file-if-exists=.env.local scripts/billing-reconcile.mjs",
     "seed:demo": "node --env-file-if-exists=.env.local scripts/seed-demo.mjs",
     "storage:setup": "node --env-file-if-exists=.env.local scripts/ensure-product-images-bucket.mjs"
   },

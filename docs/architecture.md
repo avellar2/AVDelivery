@@ -7,7 +7,7 @@
 2. **Servidor como fonte de verdade**: autenticação, autorização e validação acontecem no servidor.
    O banco reforça as mesmas regras via RLS.
 3. **Menor privilégio**: cada consulta usa a sessão do usuário. A chave `service_role` existe apenas
-   nos scripts de bootstrap/seed.
+   em scripts server-side e nas rotas/serviços de cobrança que precisam falar com o provedor.
 4. **Baixo custo operacional**: Next.js + Supabase, sem ORM, sem dependências de UI e sem serviços
    pagos.
 5. **Portabilidade**: nenhum recurso proprietário de hospedagem. O app roda em qualquer ambiente
@@ -48,9 +48,11 @@ src/
     auth/confirm/route.ts      verificação de token_hash/code (recovery)
     auth/signout/route.ts      encerramento de sessão (POST)
     api/dashboard/products/[id]/image/route.ts  upload/remoção de imagem
+    api/webhooks/asaas/route.ts  webhook durável e autenticado do Asaas
     dashboard/
       layout.tsx               shell autenticado + contexto da loja ativa
       page.tsx                 visão geral / seleção de loja / estado sem loja
+      assinatura/              estado comercial e histórico (owner)
       configuracoes/           edição dos dados públicos e do checkout da loja
       produtos/                painel do cardápio (produtos/categorias/adicionais)
       pedidos/                 fila e operação de pedidos
@@ -58,7 +60,9 @@ src/
     entregador/                painel mobile do entregador (próprias entregas)
     admin/
       layout.tsx               proteção de superadministrador
-      page.tsx                 lista global de estabelecimentos
+      page.tsx                 lista global, métricas, busca, filtro e paginação
+      lojas/nova/              cadastro transacional de estabelecimento
+      lojas/[id]/              assinatura, vínculos, faturas e auditoria
     loja/[slug]/page.tsx       cardápio público + carrinho/checkout
     loja/[slug]/pedido/[numero]/page.tsx  acompanhamento por token (sem login)
     error.tsx / not-found.tsx
@@ -78,6 +82,8 @@ src/
     deliveries/                entregadores, entregas, RPCs, regras e ações
     dashboard/                 definição da navegação
     platform-admin/            guard e consultas globais
+    subscriptions/             estado efetivo, métricas, validações, consultas e ações comerciais
+    billing/                   perfil, checkout, cobrança Asaas, webhook, conciliação e tipos
   lib/
     supabase/                  config, clients SSR/anônimo, proxy e route helper
     errors.ts                  AppError e mensagens públicas
@@ -270,6 +276,51 @@ Detalhes de fluxo, máquina de estados, idempotência e limitações: [orders.md
 Detalhes: [gps-android.md](gps-android.md). GUI web: [gps.md](gps.md). Custos:
 [gps-costs.md](gps-costs.md).
 
+## Assinaturas e acesso comercial (Etapa 6A)
+
+- `src/modules/subscriptions` concentra tipos, cálculo de estado efetivo em TypeScript, métricas,
+  validações Zod, consultas e Server Actions. A regra de negócio autoritativa continua no banco.
+- `private.effective_subscription_state` e `private.store_has_commercial_access` calculam o acesso a
+  partir de status, datas e isenção. O TypeScript espelha a mesma lógica apenas para exibir estado e
+  rótulos; a decisão de bloquear pedido é do trigger `BEFORE INSERT` em `orders`.
+- A vitrine recebe `hasCommercialAccess` de `get_store_commercial_status(slug)` (RPC pública por
+  slug). O servidor passa o valor para o componente de storefront e para o carrinho; o checkout
+  desabilita quando não há acesso, mas a garantia final é o banco.
+- O bloqueio é de **novas vendas**: pedidos existentes, cardápio, painel e histórico permanecem.
+- O onboarding usa `admin_create_store`, que cria loja, assinatura, vínculo de owner e eventos em
+  uma transação; o slug é protegido por advisory lock e restrição única.
+- As ações do superadministrador (`admin_update_subscription`, `admin_add_store_owner`,
+  `admin_update_store`) são RPCs `SECURITY DEFINER` com `search_path = ''`, verificação de
+  `platform_admins` e auditoria em `subscription_events`.
+- Não há integração de pagamento na Etapa 6A: a interface mostra o estado comercial, não um checkout
+  de assinatura.
+
+Detalhes: [subscriptions.md](subscriptions.md).
+
+## Cobrança recorrente (Etapa 6B)
+
+- `src/modules/billing/providers/asaas` isola o provedor: configuração Sandbox-only, cliente HTTP
+  com timeout/retry, schemas Zod, conversão de centavos, erros seguros e parser de webhook.
+- `src/modules/billing/service.ts` é `server-only` e coordena perfil, checkout e verificação manual;
+  usa `service_role` apenas no servidor.
+- `src/modules/billing/actions.ts` expõe Server Actions validadas para o owner; as RPCs de escrita
+  continuam exclusivas de `service_role`.
+- `src/modules/billing/reconcile-core.ts` transforma o estado autoritativo do Asaas em chamadas
+  idempotentes à RPC, tanto no webhook quanto na conciliação.
+- `POST /api/webhooks/asaas` autentica por `asaas-access-token`, persiste o evento antes de processar,
+  consulta o provedor e só então aplica o estado. O payload nunca é prova de pagamento.
+- O banco concentra as invariantes: valor exato do plano, moeda BRL, cliente/assinatura externos,
+  transições protegidas, período que só avança, `dedupe_key` e auditoria.
+- Não há worker, fila ou agendador. O webhook processa de forma síncrona e
+  `scripts/billing-reconcile.mjs` é a recuperação manual reenviável.
+- A tela `/dashboard/assinatura` mostra perfil, estado externo, link/Pix e aviso explícito de
+  Sandbox; não existe botão “Pagar agora” nem coleta de cartão.
+
+Detalhes: [asaas-integration.md](asaas-integration.md), [webhooks.md](webhooks.md),
+[billing-payment-flow.md](billing-payment-flow.md), [billing-idempotency.md](billing-idempotency.md),
+[billing-reconciliation.md](billing-reconciliation.md), [billing-delinquency.md](billing-delinquency.md)
+e [billing-sandbox.md](billing-sandbox.md).
+
 ## Decisões técnicas
 
 ### Next.js 16 sem Cache Components
@@ -352,3 +403,15 @@ Vitest (68 de integração) e 16 E2E, incluindo o fluxo de rastreamento em 13 pa
 revogação, limpeza e isolamento entre lojas. O GPS web em primeiro plano está homologado; o envio com
 tela bloqueada/app em segundo plano permanece pendente por falta de dispositivo físico. Ver
 [gps.md](gps.md) e [homologation.md](homologation.md).
+
+**Etapa 6A implementada e validada em 2026-11-04**: 20 migrações aplicadas sem `reset`, 237 testes
+Vitest (23 arquivos) e 17 E2E, incluindo o ciclo comercial completo. Há plano, assinatura, trial,
+carência, isenção, onboarding, auditoria e bloqueio de novas vendas. Ver
+[subscriptions.md](subscriptions.md).
+
+**Etapa 6B homologada no Asaas Sandbox em 2026-11-04**: 3 migrações novas de schema e 3 migrações de
+correção (26 no total), testes Vitest (unitários e integração real) e 17 E2E. O ciclo externo foi
+executado de ponta a ponta com cobrança Pix de Sandbox de R$ 59,90, confirmação simulada pelo
+provedor, webhook autenticado e liberação transacional da loja. **Não houve conta, contrato ou
+movimentação de dinheiro real**, e a produção permanece bloqueada pela trava Sandbox-only. Ver
+[billing-sandbox.md](billing-sandbox.md) e [billing-production-limits.md](billing-production-limits.md).

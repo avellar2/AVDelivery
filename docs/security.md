@@ -236,6 +236,75 @@ grant de escrita para `anon` ou `authenticated`: a única porta de escrita são 
 - Coordenadas não são logadas, não entram em URL e não há histórico de rota. Retenção: somente
   durante a entrega ativa.
 
+### Assinaturas e administração comercial (Etapa 6A)
+
+- RLS habilitada em `plans`, `subscriptions`, `invoices` e `subscription_events`.
+- `anon` lê apenas o status comercial público por slug, via `get_store_commercial_status`, sem
+  expor ids, valores de fatura, motivo de isenção ou histórico.
+- `authenticated` lê apenas a própria assinatura, faturas e eventos (owner) ou dados
+  administrativos (superadministrador), por RLS e RPCs; não há `INSERT`, `UPDATE` ou `DELETE`
+  direto para owner, manager, employee ou driver.
+- `plans` é legível por autenticados para exibição; escrita é exclusiva de `service_role`.
+- RPCs administrativas (`admin_create_store`, `admin_add_store_owner`, `admin_update_store`,
+  `admin_update_subscription`, `admin_list_store_billing`) verificam `platform_admins` via
+  `auth.uid()`, usam `SECURITY DEFINER` com `search_path = ''` e revogam execução de `anon`.
+- O onboarding usa advisory lock por slug + restrição única, evitando duas lojas com o mesmo
+  identificador em requisições concorrentes.
+- `request_id`/`dedupe_key` tornam criação e ações administrativas idempotentes; repetir não duplica
+  eventos.
+- `subscription_events` é imutável: atualização e exclusão avulsa falham com
+  `insufficient_privilege`. A cascata de exclusão da loja é a única exceção, condicionada à
+  inexistência da loja.
+- Faturas exigem `paid_at` quando `paid` e referência externa única por provedor; não é possível
+  fabricar uma fatura paga sem data de pagamento.
+- O bloqueio de novas vendas é aplicado por trigger `BEFORE INSERT` em `orders`, não apenas pela UI;
+  chamadas diretas à RPC também são recusadas. Pedidos já aceitos não são tocados.
+- Isenções exigem motivo e geram evento. Lojas preexistentes foram isentas explicitamente
+  (`grandfathered`); não há isenção automática para lojas futuras.
+- `service_role` não é usada no navegador. Não há coleta nem armazenamento de dados de cartão.
+
+### Cobrança Asaas (Etapa 6B)
+
+- **Sandbox-only por código:** `resolveAsaasConfig` rejeita `api.asaas.com`, `www.asaas.com`, HTTP,
+  host parecido e caminho diferente de `/v3`. `ASAAS_ENVIRONMENT` diferente de `sandbox` lança erro.
+  O script de conciliação repete a checagem e encerra se não for Sandbox.
+- **Webhook:** autenticação oficial por `asaas-access-token`, comparada em tempo constante com
+  SHA-256 + `timingSafeEqual`. Sem token forte configurado, responde `503`; token inválido, `401`.
+  Não há HMAC inventado. Limite de 256 KiB antes e depois de ler o corpo.
+- **O payload não é prova:** o processador consulta `GET /payments/{id}` ou
+  `GET /subscriptions/{id}` e aplica apenas o estado autoritativo. Um corpo forjado não ativa loja.
+- **Sem confiança em `store_id`:** a associação vem de `subscriptions.external_subscription_id` e
+  `billing_customers.external_customer_id` previamente gravados; um `store_id` no payload é ignorado.
+- **Valor e moeda:** a RPC exige exatamente `plans.price_cents`, moeda `BRL`, assinatura externa e
+  cliente externo correspondentes. Divergência gera erro e não altera fatura.
+- **Idempotência durável:** `billing_webhook_events (provider, external_event_id)` único; evento
+  persistido antes do processamento; reivindicação condicional; `processed` só ao final. Repetição
+  não estende período nem duplica `subscription_events`.
+- **Caixa de entrada isolada:** `billing_webhook_events` não tem política para `authenticated`/`anon`;
+  somente `service_role` acessa.
+- **Escrita do owner negada:** `billing_customers` e `billing_checkout_requests` têm RLS de leitura por
+  loja; não há `INSERT/UPDATE/DELETE` direto. `owner_upsert_billing_profile` e
+  `owner_get_billing_profile` verificam `auth.uid()` e papel `owner` internamente.
+- **Funções de serviço:** `billing_bind_customer`, `billing_begin_checkout`,
+  `billing_complete_checkout`, `billing_fail_checkout`, `billing_apply_payment_event`,
+  `billing_update_external_subscription_status` e `billing_reconciliation_candidates` são
+  `SECURITY DEFINER` com `search_path = ''`, `EXECUTE` revogado de `public/anon/authenticated` e
+  concedido somente a `service_role`.
+- **Nenhum dado de cartão:** não há formulário de cartão, CVV ou tokenização própria. O pagamento
+  ocorre no link/QR oficial do Asaas; o AVDelivery armazena apenas URL HTTPS validada e Pix copia e
+  cola.
+- **Link seguro:** `safeInvoiceUrl` aceita somente HTTPS e domínio `asaas.com`/`*.asaas.com`; links
+  arbitrários não são renderizados.
+- **Documento pessoal:** o perfil guarda CPF/CNPJ porque o provedor exige; o metadata de auditoria
+  registra apenas o tipo (`cpf`/`cnpj`), nunca o número. Chaves e tokens nunca são exibidos.
+- **Sem produção:** a aplicação não tem caminho para `api.asaas.com`; não há fallback silencioso.
+- **Sem worker:** webhooks são síncronos e a conciliação é manual; isso está documentado e não é
+  apresentado como processamento assíncrono confiável.
+
+Advisor residual aceito: `owner_get_billing_profile` e `owner_upsert_billing_profile` aparecem como
+`SECURITY DEFINER` executáveis por `authenticated`, pois são a porta do owner; ambas validam sessão,
+vínculo e papel internamente. O mesmo padrão já existia em `admin_list_store_billing` na Etapa 6A.
+
 ### Rate limit e abuso
 
 - Checkout: 10 tentativas/min por IP + loja, em memória por instância.
@@ -304,6 +373,8 @@ função `security definer`, em vez de fazer subconsulta na própria tabela.
 - Não há funções de autorização expostas via `/rest/v1/rpc`: elas ficam em `private`.
 - Funções de trigger têm `EXECUTE` revogado das roles da API e não podem ser chamadas como RPC.
 - `platform_admins` permite `SELECT` apenas da própria linha.
+- `plans` é legível por autenticados; `subscriptions`, `invoices` e `subscription_events` são
+  legíveis apenas pelo owner da loja ou superadministrador, conforme a política.
 - `service_role` ignora RLS, não é exposta ao cliente e é usada apenas em scripts.
 
 ## Permissões por coluna
@@ -396,6 +467,10 @@ número sequencial.
 ## Segredos e variáveis
 
 - `SUPABASE_SERVICE_ROLE_KEY` não é importada em `src/`; aparece somente em `scripts/`.
+- `ASAAS_API_KEY` e `ASAAS_WEBHOOK_TOKEN` são lidas apenas em módulos `server-only`, no route handler
+  do webhook e no script de conciliação. Nunca usam prefixo `NEXT_PUBLIC_` e nunca são exibidas na
+  interface; a tela mostra apenas quais nomes de variáveis faltam.
+- O cliente Asaas não registra requisição, resposta, cabeçalhos ou credencial; erros são sanitizados.
 - `.env*` está no `.gitignore`, com exceção de `.env.example` (sem valores reais).
 - Nenhuma chave é impressa nos scripts; apenas o host do projeto.
 - `NEXT_PUBLIC_*` é público por definição e contém somente URL e chave anônima.
@@ -453,21 +528,24 @@ endereços nunca são logados.
    acompanhamento usam limitador em memória por instância + limites por telefone no banco. Não há
    limitador distribuído nem CAPTCHA.
 3. **Sem MFA** para superadministradores.
-4. **Sem trilha de auditoria** de alterações de papel/loja.
-5. **Criação de lojas/usuários apenas por script** — não há UI administrativa nesta etapa.
+4. **Auditoria comercial, não administrativa ampla** — `subscription_events` cobre o ciclo
+   comercial; alterações de papel e outras ações administrativas ainda não têm trilha.
+5. **Onboarding pela UI, mas sem convite por token** — o superadministrador cria a loja e vincula um
+   usuário existente; não há cadastro público de estabelecimento nem convite por e-mail.
 6. **Superadministrador pode ler todos os perfis** (política `profiles_select_own_or_admin`),
    intencional para suporte; pode ser restringido no futuro.
 7. **Proprietário pode inserir qualquer usuário existente por UUID** como membro (via API); a UI de
    convites ainda não existe.
 8. **Logo da loja não é renderizado** — a página pública usa monograma; imagens de produto são
    renderizadas a partir do bucket público.
-9. **Sem paginação no admin** — consulta limitada a 200 lojas.
+9. **Busca e paginação no admin** — a lista é paginada em 10 itens e filtra por texto/estado; não
+   há exportação nem busca por documento.
 10. **Segurança do projeto Supabase** (acesso ao dashboard, chaves, backups) é parte da fronteira de
     confiança e deve ser protegida com MFA e rotação de chaves.
-11. **Homologação concluída em 2026-10-29 (Etapas 1 e 2) e 2026-10-30 (Etapas 3 e 4)** — 59
-    integrações com Auth/PostgREST/Storage, 179 testes Vitest e 14 E2E, incluindo login/logout,
-    recuperação, cardápio/uploads, o fluxo completo de pedidos e o fluxo de entrega. Pendências não
-    bloqueantes: HIBP, entrega real de e-mail e rotação após expiração de 1h. Ver
+11. **Homologação em 2026-10-29 a 2026-11-04** — integrações com Auth/PostgREST/Storage, 307 testes
+    Vitest e 17 E2E, incluindo login/logout, recuperação, cardápio/uploads, pedidos, entregas,
+    rastreamento, ciclo comercial e cobrança Sandbox interna. Pendências não bloqueantes: HIBP,
+    entrega real de e-mail, rotação após expiração de 1h e homologação externa do Asaas. Ver
     [homologation.md](homologation.md).
 12. **Bucket público** — imagens continuam acessíveis por URL mesmo após desativação; não usar para
     conteúdo privado.
@@ -499,6 +577,25 @@ endereços nunca são logados.
     conferidos no banco. Rastreamento com tela bloqueada permanece pendente.
 23. **Localização é dado pessoal** — o envio é opt-in, limitado à entrega ativa e sem histórico. A
     posição é apagada ao concluir, cancelar, reatribuir ou parar o compartilhamento.
+24. **Cobrança em Sandbox, não em produção** — a integração Asaas da Etapa 6B foi homologada de ponta
+    a ponta no Asaas Sandbox (cobrança Pix, confirmação simulada, webhook autenticado e liberação
+    transacional). Não há ativação em produção, nota fiscal, estorno automático pela UI ou
+    processamento assíncrono. A ativação por pagamento depende do webhook/conciliação verificados.
+25. **Isenção e trial são regras comerciais** — um superadministrador pode ativar ou isentar
+    manualmente, sempre com evento auditável. O trial não é renovável automaticamente e não há
+    prevenção de abuso por múltiplas lojas na mesma organização nesta etapa.
+26. **Sem worker/fila de cobrança** — o processamento de webhook é síncrono na requisição; falhas
+    dependem de reentrega do Asaas ou de `npm run billing:reconcile`. Não há alerta automático de
+    falha nem dead-letter queue.
+27. **Sem rate limit distribuído no webhook** — a proteção é token forte, limite de corpo, dedupe e
+    consulta ao provedor. Um atacante que conheça o endpoint ainda pode gerar requisições inválidas;
+    não há CAPTCHA (não aplicável a webhook) nem bloqueio por IP nesta etapa.
+28. **Dados de faturamento são pessoais** — CPF/CNPJ, e-mail, telefone e endereço são necessários ao
+    provedor. Não há política automática de retenção/anonimização; a remoção da loja cascateia os
+    dados locais, mas obrigações futuras podem exigir retenção separada.
+29. **Homologação externa pendente do Asaas** — a criação real de cobrança no Sandbox, a confirmação
+    simulada pelo provedor e o webhook externo autenticado não foram executados. Ver
+    [billing-sandbox.md](billing-sandbox.md).
 
 ## Checklist operacional
 

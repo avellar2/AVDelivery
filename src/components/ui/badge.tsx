@@ -1,11 +1,12 @@
 import { cn } from "@/lib/utils";
 
-export type BadgeVariant = "neutral" | "success" | "warning" | "muted" | "brand";
+export type BadgeVariant = "neutral" | "success" | "warning" | "danger" | "muted" | "brand";
 
 const variantClasses: Record<BadgeVariant, string> = {
   neutral: "border-zinc-200 bg-zinc-100 text-zinc-700",
   success: "border-emerald-200 bg-emerald-50 text-emerald-700",
   warning: "border-amber-200 bg-amber-50 text-amber-800",
+  danger: "border-red-200 bg-red-50 text-red-700",
   muted: "border-zinc-200 bg-white text-zinc-500",
   brand: "border-orange-200 bg-orange-50 text-orange-700",
 };
