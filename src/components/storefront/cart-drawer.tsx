@@ -131,6 +131,7 @@ export function CartDrawer({
   open,
   onClose,
   store,
+  hasCommercialAccess,
   lines,
   step,
   onStep,
@@ -146,6 +147,7 @@ export function CartDrawer({
   open: boolean;
   onClose: () => void;
   store: PublicMenuStore;
+  hasCommercialAccess: boolean;
   lines: CartLine[];
   step: DrawerStep;
   onStep: (step: DrawerStep) => void;
@@ -209,8 +211,9 @@ export function CartDrawer({
     });
   }
 
+  const acceptingOrders = store.acceptingOrders && hasCommercialAccess;
   const checkoutAvailable =
-    store.acceptingOrders && (deliveryAvailable || pickupAvailable) && paymentOptions.length > 0;
+    acceptingOrders && (deliveryAvailable || pickupAvailable) && paymentOptions.length > 0;
 
   const effectiveFulfillment: OrderFulfillmentType = deliveryAvailable
     ? fulfillmentType
@@ -397,6 +400,12 @@ export function CartDrawer({
             <Alert variant="warning" className="mb-4" title="Pedidos pausados">
               A loja não está aceitando novos pedidos agora. Você pode montar o carrinho, mas a
               finalização está temporariamente indisponível.
+            </Alert>
+          ) : !hasCommercialAccess ? (
+            <Alert variant="warning" className="mb-4" title="Novas vendas indisponíveis">
+              Esta loja está temporariamente sem novas vendas pelo site. Você pode montar o
+              carrinho, mas a finalização está indisponível até a regularização pelo
+              estabelecimento.
             </Alert>
           ) : null}
 
@@ -937,7 +946,7 @@ export function CartDrawer({
                   <span>Subtotal</span>
                   <span>{formatCurrency(subtotalCents)}</span>
                 </div>
-                {store.acceptingOrders && lines.length > 0 && !totals.meetsMinimum ? (
+                {acceptingOrders && lines.length > 0 && !totals.meetsMinimum ? (
                   <p className="text-xs font-medium text-amber-700">
                     O pedido mínimo é {formatCurrency(store.minOrderCents)}. Faltam{" "}
                     {formatCurrency(totals.missingForMinimumCents)}.

@@ -34,9 +34,11 @@ function lineSignature(line: Pick<CartLine, "productId" | "notes" | "options">):
 export function Storefront({
   store,
   categories,
+  hasCommercialAccess,
 }: {
   store: PublicMenuStore;
   categories: PublicMenuCategory[];
+  hasCommercialAccess: boolean;
 }) {
   const [lines, setLines] = useState<CartLine[]>([]);
   const [hydrated, setHydrated] = useState(false);
@@ -49,6 +51,7 @@ export function Storefront({
 
   const subtotalCents = useMemo(() => cartSubtotalCents(lines), [lines]);
   const itemCount = useMemo(() => lines.reduce((total, line) => total + line.quantity, 0), [lines]);
+  const acceptingOrders = store.acceptingOrders && hasCommercialAccess;
 
   useEffect(() => {
     let cancelled = false;
@@ -207,12 +210,16 @@ export function Storefront({
               </div>
               <span
                 className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                  store.acceptingOrders
+                  acceptingOrders
                     ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                     : "border-amber-200 bg-amber-50 text-amber-800"
                 }`}
               >
-                {store.acceptingOrders ? "Aceitando pedidos" : "Pedidos pausados"}
+                {acceptingOrders
+                  ? "Aceitando pedidos"
+                  : store.acceptingOrders
+                    ? "Novas vendas indisponíveis"
+                    : "Pedidos pausados"}
               </span>
             </div>
 
@@ -254,6 +261,12 @@ export function Storefront({
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             A loja está com os pedidos pausados neste momento. Você pode montar o carrinho, mas não
             será possível finalizar até que ela reabra.
+          </div>
+        ) : !hasCommercialAccess ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Esta loja está temporariamente sem novas vendas pelo site. Você pode consultar o
+            cardápio, mas não será possível finalizar pedidos até a regularização pelo
+            estabelecimento.
           </div>
         ) : null}
 
@@ -393,6 +406,7 @@ export function Storefront({
         open={cartOpen}
         onClose={() => setCartOpen(false)}
         store={store}
+        hasCommercialAccess={hasCommercialAccess}
         lines={lines}
         step={step}
         onStep={setStep}

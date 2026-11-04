@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonClassName } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,6 +15,8 @@ import {
 } from "@/modules/memberships/roles";
 import { countDeliveriesForStore } from "@/modules/deliveries/service";
 import { countOrdersByStatus } from "@/modules/orders/service";
+import { commercialStateLabel } from "@/modules/subscriptions/access";
+import { getCommercialStatusBySlug } from "@/modules/subscriptions/service";
 import { getDashboardContext } from "@/modules/stores/active-store";
 import { selectStoreAction } from "@/modules/stores/actions";
 
@@ -91,6 +94,8 @@ export default async function DashboardPage() {
   const canOperate = canOperateOrders(membership.role);
   const canDeliver = canAssignDeliveries(membership.role);
   const driverAccess = isDriver(membership.role);
+  const commercial = await getCommercialStatusBySlug(membership.storeSlug);
+  const commercialBlocked = Boolean(membership.storeActive && commercial && !commercial.hasAccess);
   const orderCounts = canOperate ? await countOrdersByStatus(membership.storeId) : null;
   const deliveryCounts =
     canDeliver || driverAccess ? await countDeliveriesForStore(membership.storeId) : null;
@@ -125,6 +130,25 @@ export default async function DashboardPage() {
           Ver página pública
         </Link>
       </header>
+
+      {commercialBlocked ? (
+        <Alert variant="error" title="Novos pedidos bloqueados">
+          A assinatura desta loja está{" "}
+          {commercialStateLabel(commercial?.state ?? "missing").toLowerCase()}. Produtos, clientes,
+          pedidos anteriores e entregas em andamento continuam preservados, mas novos pedidos são
+          recusados até a regularização.{" "}
+          {membership.role === "owner" ? (
+            <Link
+              href="/dashboard/assinatura"
+              className="font-semibold underline underline-offset-2"
+            >
+              Ver assinatura e regularizar
+            </Link>
+          ) : (
+            "Solicite ao proprietário a regularização do acesso."
+          )}
+        </Alert>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card>

@@ -72,6 +72,13 @@ function mapCheckoutError(error: unknown): CreateOrderResult {
         code,
         message: "A loja não está aceitando novos pedidos neste momento.",
       };
+    case "subscription_inactive":
+      return {
+        ok: false,
+        code,
+        message:
+          "Esta loja está temporariamente sem novas vendas pelo site. Tente novamente mais tarde.",
+      };
     case "product_unavailable":
       return {
         ok: false,
