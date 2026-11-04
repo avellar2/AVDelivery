@@ -381,6 +381,53 @@ describe.skipIf(!enabled)("cobrança Asaas e RLS (integração real)", () => {
     expect(status.data).toMatchObject({ hasAccess: false, state: "expired" });
   });
 
+  it("reutiliza o checkout aberto e conclui pela requisição devolvida", async () => {
+    const secondPageRequest = randomUUID();
+    const begin = await admin.rpc("billing_begin_checkout", {
+      p_store_id: storeA,
+      p_request_id: secondPageRequest,
+    });
+
+    expect(begin.error).toBeNull();
+    const began = begin.data as {
+      reused?: boolean;
+      requestId?: string;
+      externalSubscriptionId?: string;
+    } | null;
+    expect(began).toMatchObject({
+      reused: true,
+      requestId: checkoutRequestA,
+      externalSubscriptionId: externalSubscriptionA,
+    });
+
+    const complete = await admin.rpc("billing_complete_checkout", {
+      p_store_id: storeA,
+      p_request_id: began?.requestId,
+      p_external_subscription_id: externalSubscriptionA,
+      p_external_status: "ACTIVE",
+      p_payment_id: paymentA,
+      p_payment_url: `https://sandbox.asaas.com/i/${paymentA}`,
+      p_pix_payload: `pix-${paymentA}`,
+      p_amount_cents: priceCents,
+      p_due_date: dueDate,
+      p_billing_type: "PIX",
+    });
+
+    expect(complete.error).toBeNull();
+
+    const { data: requests } = await admin
+      .from("billing_checkout_requests")
+      .select("request_id")
+      .eq("store_id", storeA);
+    expect(requests).toEqual([{ request_id: checkoutRequestA }]);
+
+    const { count } = await admin
+      .from("invoices")
+      .select("id", { count: "exact", head: true })
+      .eq("store_id", storeA);
+    expect(count).toBe(1);
+  });
+
   it("rejeita valor adulterado, cliente divergente e assinatura desconhecida", async () => {
     const tampered = await admin.rpc(
       "billing_apply_payment_event",

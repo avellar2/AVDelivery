@@ -208,6 +208,7 @@ export async function startOwnerCheckout(
 ): Promise<CheckoutResult> {
   const admin = createSupabaseAdminClient();
   let attempted = false;
+  let checkoutRequestId = requestId;
 
   try {
     const profile = await getOwnerBillingProfile(storeId);
@@ -259,6 +260,11 @@ export async function startOwnerCheckout(
 
     const checkout = asRecord(data) ?? {};
     const reused = checkout.reused === true;
+    // `billing_begin_checkout` may reuse an earlier open request and return its
+    // id instead of the freshly generated page id. Complete/fail the request
+    // that was actually reserved, otherwise a repeated click ends with
+    // checkout_not_found even though the checkout is valid.
+    checkoutRequestId = asString(checkout.requestId) ?? requestId;
     const priceCents = asNumber(checkout.priceCents);
     const planName = String(checkout.planName ?? "AVDelivery");
     let externalSubscriptionId = asString(checkout.externalSubscriptionId);
@@ -309,7 +315,7 @@ export async function startOwnerCheckout(
 
     const completed = await admin.rpc("billing_complete_checkout", {
       p_store_id: storeId,
-      p_request_id: requestId,
+      p_request_id: checkoutRequestId,
       p_external_subscription_id: externalSubscriptionId,
       p_external_status: externalStatus,
       p_payment_id: payment?.id ?? null,
@@ -349,7 +355,7 @@ export async function startOwnerCheckout(
     if (attempted) {
       await admin.rpc("billing_fail_checkout", {
         p_store_id: storeId,
-        p_request_id: requestId,
+        p_request_id: checkoutRequestId,
         p_error: mapCheckoutError(error).slice(0, 1000),
       });
     }
