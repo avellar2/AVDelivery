@@ -4,10 +4,11 @@ import {
   canManageSettings,
   canOperateOrders,
 } from "@/modules/memberships/roles";
+import { canViewSubscription } from "@/modules/subscriptions/access";
 import type { StoreMemberRole } from "@/types/database";
 
 export type DashboardNavItem = {
-  key: "overview" | "products" | "orders" | "deliveries" | "staff" | "settings";
+  key: "overview" | "subscription" | "products" | "orders" | "deliveries" | "staff" | "settings";
   label: string;
   href: string | null;
   available: boolean;
@@ -20,6 +21,7 @@ export function getDashboardNavItems(role: StoreMemberRole | null): DashboardNav
   const canManageProducts = role ? canManageMenu(role) : false;
   const canOperate = role ? canOperateOrders(role) : false;
   const canDeliver = role ? canAssignDeliveries(role) : false;
+  const canSeeSubscription = role ? canViewSubscription(role) : false;
   const isDriverRole = role === "driver";
 
   return [
@@ -29,6 +31,14 @@ export function getDashboardNavItems(role: StoreMemberRole | null): DashboardNav
       href: "/dashboard",
       available: true,
       description: "Resumo do estabelecimento",
+    },
+    {
+      key: "subscription",
+      label: "Assinatura",
+      href: canSeeSubscription ? "/dashboard/assinatura" : null,
+      available: canSeeSubscription,
+      locked: !canSeeSubscription,
+      description: "Plano, teste e cobrança",
     },
     {
       key: "products",
