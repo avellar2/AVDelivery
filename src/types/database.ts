@@ -13,6 +13,15 @@ export type OrderPaymentStatus = "pending" | "paid" | "canceled";
 
 export type DeliveryStatus = "assigned" | "picked_up" | "delivered" | "canceled";
 
+export type BillingInterval = "monthly";
+
+export type SubscriptionStatus = "trialing" | "active" | "grace" | "expired" | "canceled";
+
+export type InvoiceStatus = "pending" | "paid" | "overdue" | "canceled" | "refunded";
+
+export type CommercialState =
+  "missing" | "inactive" | "trialing" | "active" | "grace" | "exempt" | "expired" | "canceled";
+
 export type Database = {
   public: {
     Tables: {
@@ -137,6 +146,172 @@ export type Database = {
         };
         Update: {
           created_at?: string;
+        };
+        Relationships: [];
+      };
+      plans: {
+        Row: {
+          id: string;
+          code: string;
+          name: string;
+          price_cents: number;
+          currency: string;
+          billing_interval: BillingInterval;
+          trial_days: number;
+          grace_days: number;
+          active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          code: string;
+          name: string;
+          price_cents: number;
+          currency?: string;
+          billing_interval?: BillingInterval;
+          trial_days?: number;
+          grace_days?: number;
+          active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          code?: string;
+          name?: string;
+          price_cents?: number;
+          currency?: string;
+          billing_interval?: BillingInterval;
+          trial_days?: number;
+          grace_days?: number;
+          active?: boolean;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      subscriptions: {
+        Row: {
+          id: string;
+          store_id: string;
+          plan_id: string;
+          status: SubscriptionStatus;
+          is_exempt: boolean;
+          exemption_reason: string | null;
+          trial_started_at: string | null;
+          trial_ends_at: string | null;
+          current_period_start: string | null;
+          current_period_end: string | null;
+          grace_ends_at: string | null;
+          canceled_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          plan_id: string;
+          status?: SubscriptionStatus;
+          is_exempt?: boolean;
+          exemption_reason?: string | null;
+          trial_started_at?: string | null;
+          trial_ends_at?: string | null;
+          current_period_start?: string | null;
+          current_period_end?: string | null;
+          grace_ends_at?: string | null;
+          canceled_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          plan_id?: string;
+          status?: SubscriptionStatus;
+          is_exempt?: boolean;
+          exemption_reason?: string | null;
+          trial_started_at?: string | null;
+          trial_ends_at?: string | null;
+          current_period_start?: string | null;
+          current_period_end?: string | null;
+          grace_ends_at?: string | null;
+          canceled_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      invoices: {
+        Row: {
+          id: string;
+          store_id: string;
+          subscription_id: string;
+          amount_cents: number;
+          currency: string;
+          status: InvoiceStatus;
+          period_start: string;
+          period_end: string;
+          due_at: string;
+          paid_at: string | null;
+          external_provider: string | null;
+          external_reference: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          subscription_id: string;
+          amount_cents: number;
+          currency?: string;
+          status?: InvoiceStatus;
+          period_start: string;
+          period_end: string;
+          due_at: string;
+          paid_at?: string | null;
+          external_provider?: string | null;
+          external_reference?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          amount_cents?: number;
+          currency?: string;
+          status?: InvoiceStatus;
+          period_start?: string;
+          period_end?: string;
+          due_at?: string;
+          paid_at?: string | null;
+          external_provider?: string | null;
+          external_reference?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      subscription_events: {
+        Row: {
+          id: string;
+          subscription_id: string;
+          store_id: string;
+          event_type: string;
+          actor_id: string | null;
+          reason: string | null;
+          metadata: Json;
+          dedupe_key: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          subscription_id: string;
+          store_id: string;
+          event_type: string;
+          actor_id?: string | null;
+          reason?: string | null;
+          metadata?: Json;
+          dedupe_key?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          event_type?: string;
+          reason?: string | null;
+          metadata?: Json;
+          dedupe_key?: string | null;
         };
         Relationships: [];
       };
@@ -548,6 +723,85 @@ export type Database = {
     };
     Views: { [_ in never]: never };
     Functions: {
+      get_store_commercial_status: {
+        Args: { p_store_slug: string };
+        Returns: Json;
+      };
+      get_store_subscription: {
+        Args: { p_store_id: string };
+        Returns: Json;
+      };
+      admin_list_store_billing: {
+        Args: Record<PropertyKey, never>;
+        Returns: Array<{
+          store_id: string;
+          name: string;
+          slug: string;
+          active: boolean;
+          created_at: string;
+          member_count: number;
+          owner_count: number;
+          subscription_id: string | null;
+          status: SubscriptionStatus | null;
+          is_exempt: boolean | null;
+          plan_id: string | null;
+          plan_name: string | null;
+          price_cents: number | null;
+          currency: string | null;
+          trial_started_at: string | null;
+          trial_ends_at: string | null;
+          current_period_start: string | null;
+          current_period_end: string | null;
+          grace_ends_at: string | null;
+          canceled_at: string | null;
+          effective_state: string;
+        }>;
+      };
+      admin_create_store: {
+        Args: {
+          p_name: string;
+          p_slug: string;
+          p_description: string | null;
+          p_phone: string | null;
+          p_plan_id: string;
+          p_owner_user_id: string;
+          p_start_trial: boolean;
+          p_request_id: string | null;
+        };
+        Returns: Json;
+      };
+      admin_add_store_owner: {
+        Args: {
+          p_store_id: string;
+          p_user_id: string;
+          p_reason: string;
+          p_request_id: string | null;
+        };
+        Returns: Json;
+      };
+      admin_update_store: {
+        Args: {
+          p_store_id: string;
+          p_name: string;
+          p_description: string | null;
+          p_phone: string | null;
+          p_active: boolean;
+          p_reason: string | null;
+          p_request_id: string | null;
+        };
+        Returns: Json;
+      };
+      admin_update_subscription: {
+        Args: {
+          p_store_id: string;
+          p_action: string;
+          p_days: number | null;
+          p_plan_id: string | null;
+          p_reason: string;
+          p_request_id: string | null;
+        };
+        Returns: Json;
+      };
       create_order: {
         Args: {
           p_store_slug: string;
@@ -651,6 +905,9 @@ export type Database = {
       order_payment_method: OrderPaymentMethod;
       order_payment_status: OrderPaymentStatus;
       delivery_status: DeliveryStatus;
+      billing_interval: BillingInterval;
+      subscription_status: SubscriptionStatus;
+      invoice_status: InvoiceStatus;
     };
     CompositeTypes: { [_ in never]: never };
   };
@@ -673,3 +930,7 @@ export type OrderEventRow = Database["public"]["Tables"]["order_events"]["Row"];
 export type DriverProfileRow = Database["public"]["Tables"]["driver_profiles"]["Row"];
 export type DeliveryRow = Database["public"]["Tables"]["deliveries"]["Row"];
 export type DeliveryEventRow = Database["public"]["Tables"]["delivery_events"]["Row"];
+export type PlanRow = Database["public"]["Tables"]["plans"]["Row"];
+export type SubscriptionRow = Database["public"]["Tables"]["subscriptions"]["Row"];
+export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
+export type SubscriptionEventRow = Database["public"]["Tables"]["subscription_events"]["Row"];
