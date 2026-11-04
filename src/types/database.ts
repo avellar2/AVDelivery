@@ -17,7 +17,7 @@ export type BillingInterval = "monthly";
 
 export type SubscriptionStatus = "trialing" | "active" | "grace" | "expired" | "canceled";
 
-export type InvoiceStatus = "pending" | "paid" | "overdue" | "canceled" | "refunded";
+export type InvoiceStatus = "pending" | "paid" | "overdue" | "canceled" | "refunded" | "chargeback";
 
 export type CommercialState =
   "missing" | "inactive" | "trialing" | "active" | "grace" | "exempt" | "expired" | "canceled";
@@ -203,6 +203,10 @@ export type Database = {
           current_period_end: string | null;
           grace_ends_at: string | null;
           canceled_at: string | null;
+          external_provider: string | null;
+          external_subscription_id: string | null;
+          external_status: string | null;
+          last_synced_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -219,6 +223,10 @@ export type Database = {
           current_period_end?: string | null;
           grace_ends_at?: string | null;
           canceled_at?: string | null;
+          external_provider?: string | null;
+          external_subscription_id?: string | null;
+          external_status?: string | null;
+          last_synced_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -233,6 +241,10 @@ export type Database = {
           current_period_end?: string | null;
           grace_ends_at?: string | null;
           canceled_at?: string | null;
+          external_provider?: string | null;
+          external_subscription_id?: string | null;
+          external_status?: string | null;
+          last_synced_at?: string | null;
           updated_at?: string;
         };
         Relationships: [];
@@ -251,6 +263,12 @@ export type Database = {
           paid_at: string | null;
           external_provider: string | null;
           external_reference: string | null;
+          external_payment_id: string | null;
+          billing_type: string | null;
+          external_status: string | null;
+          payment_url: string | null;
+          pix_payload: string | null;
+          external_created_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -267,6 +285,12 @@ export type Database = {
           paid_at?: string | null;
           external_provider?: string | null;
           external_reference?: string | null;
+          external_payment_id?: string | null;
+          billing_type?: string | null;
+          external_status?: string | null;
+          payment_url?: string | null;
+          pix_payload?: string | null;
+          external_created_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -280,6 +304,12 @@ export type Database = {
           paid_at?: string | null;
           external_provider?: string | null;
           external_reference?: string | null;
+          external_payment_id?: string | null;
+          billing_type?: string | null;
+          external_status?: string | null;
+          payment_url?: string | null;
+          pix_payload?: string | null;
+          external_created_at?: string | null;
           updated_at?: string;
         };
         Relationships: [];
@@ -312,6 +342,141 @@ export type Database = {
           reason?: string | null;
           metadata?: Json;
           dedupe_key?: string | null;
+        };
+        Relationships: [];
+      };
+      billing_customers: {
+        Row: {
+          id: string;
+          store_id: string;
+          provider: string;
+          legal_name: string;
+          document: string;
+          email: string;
+          phone: string;
+          postal_code: string | null;
+          address: string | null;
+          address_number: string | null;
+          complement: string | null;
+          province: string | null;
+          external_customer_id: string | null;
+          external_status: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          provider?: string;
+          legal_name: string;
+          document: string;
+          email: string;
+          phone: string;
+          postal_code?: string | null;
+          address?: string | null;
+          address_number?: string | null;
+          complement?: string | null;
+          province?: string | null;
+          external_customer_id?: string | null;
+          external_status?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          legal_name?: string;
+          document?: string;
+          email?: string;
+          phone?: string;
+          postal_code?: string | null;
+          address?: string | null;
+          address_number?: string | null;
+          complement?: string | null;
+          province?: string | null;
+          external_customer_id?: string | null;
+          external_status?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      billing_webhook_events: {
+        Row: {
+          id: string;
+          provider: string;
+          external_event_id: string;
+          event_type: string;
+          resource_type: string | null;
+          resource_id: string | null;
+          payload: Json;
+          status: string;
+          attempts: number;
+          last_error: string | null;
+          received_at: string;
+          processed_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          provider?: string;
+          external_event_id: string;
+          event_type: string;
+          resource_type?: string | null;
+          resource_id?: string | null;
+          payload: Json;
+          status?: string;
+          attempts?: number;
+          last_error?: string | null;
+          received_at?: string;
+          processed_at?: string | null;
+        };
+        Update: {
+          status?: string;
+          attempts?: number;
+          last_error?: string | null;
+          processed_at?: string | null;
+        };
+        Relationships: [];
+      };
+      billing_checkout_requests: {
+        Row: {
+          id: string;
+          store_id: string;
+          subscription_id: string;
+          provider: string;
+          request_id: string;
+          status: string;
+          external_subscription_id: string | null;
+          first_payment_id: string | null;
+          payment_url: string | null;
+          pix_payload: string | null;
+          error_message: string | null;
+          expires_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          subscription_id: string;
+          provider?: string;
+          request_id: string;
+          status?: string;
+          external_subscription_id?: string | null;
+          first_payment_id?: string | null;
+          payment_url?: string | null;
+          pix_payload?: string | null;
+          error_message?: string | null;
+          expires_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          status?: string;
+          external_subscription_id?: string | null;
+          first_payment_id?: string | null;
+          payment_url?: string | null;
+          pix_payload?: string | null;
+          error_message?: string | null;
+          expires_at?: string | null;
+          updated_at?: string;
         };
         Relationships: [];
       };
@@ -802,6 +967,99 @@ export type Database = {
         };
         Returns: Json;
       };
+      owner_get_billing_profile: {
+        Args: { p_store_id: string };
+        Returns: Json;
+      };
+      owner_upsert_billing_profile: {
+        Args: {
+          p_store_id: string;
+          p_legal_name: string;
+          p_document: string;
+          p_email: string;
+          p_phone: string;
+          p_postal_code?: string | null;
+          p_address?: string | null;
+          p_address_number?: string | null;
+          p_complement?: string | null;
+          p_province?: string | null;
+        };
+        Returns: Json;
+      };
+      billing_bind_customer: {
+        Args: {
+          p_store_id: string;
+          p_provider: string;
+          p_external_customer_id: string;
+        };
+        Returns: Json;
+      };
+      billing_begin_checkout: {
+        Args: { p_store_id: string; p_request_id: string };
+        Returns: Json;
+      };
+      billing_complete_checkout: {
+        Args: {
+          p_store_id: string;
+          p_request_id: string;
+          p_external_subscription_id: string;
+          p_external_status: string;
+          p_payment_id: string | null;
+          p_payment_url: string | null;
+          p_pix_payload: string | null;
+          p_amount_cents: number | null;
+          p_due_date: string | null;
+          p_billing_type: string | null;
+        };
+        Returns: Json;
+      };
+      billing_fail_checkout: {
+        Args: {
+          p_store_id: string;
+          p_request_id: string;
+          p_error: string;
+        };
+        Returns: void;
+      };
+      billing_apply_payment_event: {
+        Args: {
+          p_provider: string;
+          p_event_id: string | null;
+          p_event_type: string | null;
+          p_payment_id: string;
+          p_external_subscription_id: string;
+          p_external_customer_id: string;
+          p_external_status: string;
+          p_amount_cents: number;
+          p_currency: string;
+          p_due_date: string;
+          p_paid_at: string | null;
+          p_payment_url: string | null;
+          p_billing_type: string | null;
+          p_payload: Json;
+        };
+        Returns: Json;
+      };
+      billing_update_external_subscription_status: {
+        Args: {
+          p_external_subscription_id: string;
+          p_external_status: string;
+          p_event_id: string | null;
+          p_payload: Json;
+        };
+        Returns: Json;
+      };
+      billing_reconciliation_candidates: {
+        Args: { p_limit?: number };
+        Returns: Array<{
+          store_id: string;
+          subscription_id: string;
+          external_subscription_id: string;
+          external_status: string | null;
+          last_synced_at: string | null;
+          next_due_at: string | null;
+        }>;
+      };
       create_order: {
         Args: {
           p_store_slug: string;
@@ -934,3 +1192,7 @@ export type PlanRow = Database["public"]["Tables"]["plans"]["Row"];
 export type SubscriptionRow = Database["public"]["Tables"]["subscriptions"]["Row"];
 export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 export type SubscriptionEventRow = Database["public"]["Tables"]["subscription_events"]["Row"];
+export type BillingCustomerRow = Database["public"]["Tables"]["billing_customers"]["Row"];
+export type BillingWebhookEventRow = Database["public"]["Tables"]["billing_webhook_events"]["Row"];
+export type BillingCheckoutRequestRow =
+  Database["public"]["Tables"]["billing_checkout_requests"]["Row"];
