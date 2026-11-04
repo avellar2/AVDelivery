@@ -112,8 +112,17 @@ test.describe("fluxo comercial completo", () => {
       await expect(page.getByRole("heading", { level: 1, name: "Assinatura" })).toBeVisible();
       await expect(page.getByText("Período de teste").first()).toBeVisible();
       await expect(page.getByText(/59,90/).first()).toBeVisible();
-      await expect(page.getByText("Cobrança online")).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Cobrança pelo Asaas Sandbox" }),
+      ).toBeVisible();
+      await expect(page.getByText(/não movimenta dinheiro real/)).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Dados de faturamento" })).toBeVisible();
+      await expect(page.getByLabel("CPF ou CNPJ")).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Gerar cobrança Pix no Sandbox" }),
+      ).toBeVisible();
       await expect(page.getByRole("button", { name: /Pagar agora/i })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /Marcar como paga/i })).toHaveCount(0);
 
       // 4. Loja opera normalmente durante o teste.
       await page.goto(`/loja/${storeSlug}`);
