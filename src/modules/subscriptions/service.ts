@@ -173,7 +173,7 @@ export async function getAdminInvoices(storeId: string): Promise<InvoiceSummary[
   const { data, error } = await supabase
     .from("invoices")
     .select(
-      "id, amount_cents, currency, status, period_start, period_end, due_at, paid_at, external_provider",
+      "id, amount_cents, currency, status, period_start, period_end, due_at, paid_at, external_provider, external_payment_id, billing_type, external_status, payment_url, pix_payload",
     )
     .eq("store_id", storeId)
     .order("created_at", { ascending: false })
@@ -193,6 +193,11 @@ export async function getAdminInvoices(storeId: string): Promise<InvoiceSummary[
     dueAt: invoice.due_at,
     paidAt: invoice.paid_at,
     externalProvider: invoice.external_provider,
+    externalPaymentId: invoice.external_payment_id,
+    billingType: invoice.billing_type,
+    externalStatus: invoice.external_status,
+    paymentUrl: invoice.payment_url,
+    pixPayload: invoice.pix_payload,
   }));
 }
 
@@ -237,7 +242,7 @@ export async function getOwnerInvoices(storeId: string): Promise<InvoiceSummary[
   const { data, error } = await supabase
     .from("invoices")
     .select(
-      "id, amount_cents, currency, status, period_start, period_end, due_at, paid_at, external_provider",
+      "id, amount_cents, currency, status, period_start, period_end, due_at, paid_at, external_provider, external_payment_id, billing_type, external_status, payment_url, pix_payload",
     )
     .eq("store_id", storeId)
     .order("created_at", { ascending: false })
@@ -257,6 +262,11 @@ export async function getOwnerInvoices(storeId: string): Promise<InvoiceSummary[
     dueAt: invoice.due_at,
     paidAt: invoice.paid_at,
     externalProvider: invoice.external_provider,
+    externalPaymentId: invoice.external_payment_id,
+    billingType: invoice.billing_type,
+    externalStatus: invoice.external_status,
+    paymentUrl: invoice.payment_url,
+    pixPayload: invoice.pix_payload,
   }));
 }
 

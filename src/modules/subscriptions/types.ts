@@ -71,6 +71,11 @@ export type InvoiceSummary = {
   dueAt: string;
   paidAt: string | null;
   externalProvider: string | null;
+  externalPaymentId: string | null;
+  billingType: string | null;
+  externalStatus: string | null;
+  paymentUrl: string | null;
+  pixPayload: string | null;
 };
 
 export type SubscriptionEventSummary = {

@@ -13,6 +13,11 @@ export const SUBSCRIPTION_EVENT_LABELS: Record<string, string> = {
   admin_set_exempt: "Isenção administrativa concedida",
   admin_remove_exempt: "Isenção administrativa removida",
   admin_change_plan: "Plano alterado",
+  billing_profile_updated: "Dados de faturamento atualizados",
+  payment_confirmed: "Pagamento confirmado",
+  payment_overdue: "Cobrança vencida",
+  payment_refunded: "Pagamento estornado",
+  payment_chargeback: "Chargeback recebido",
 };
 
 export const INVOICE_STATUS_LABELS: Record<string, string> = {
@@ -21,4 +26,12 @@ export const INVOICE_STATUS_LABELS: Record<string, string> = {
   overdue: "Em atraso",
   canceled: "Cancelada",
   refunded: "Estornada",
+  chargeback: "Chargeback",
+};
+
+export const BILLING_TYPE_LABELS: Record<string, string> = {
+  PIX: "Pix",
+  BOLETO: "Boleto",
+  CREDIT_CARD: "Cartão",
+  UNDEFINED: "A definir",
 };

@@ -7,18 +7,26 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
+import { getOwnerBillingOverview } from "@/modules/billing/service";
+import type { BillingOverview } from "@/modules/billing/service";
 import {
   commercialStateLabel,
   commercialStateTone,
   daysRemaining,
 } from "@/modules/subscriptions/access";
-import { INVOICE_STATUS_LABELS, SUBSCRIPTION_EVENT_LABELS } from "@/modules/subscriptions/labels";
+import {
+  BILLING_TYPE_LABELS,
+  INVOICE_STATUS_LABELS,
+  SUBSCRIPTION_EVENT_LABELS,
+} from "@/modules/subscriptions/labels";
 import {
   getOwnerInvoices,
   getOwnerSubscription,
   getSubscriptionEvents,
 } from "@/modules/subscriptions/service";
 import { getDashboardContext } from "@/modules/stores/active-store";
+import { BillingProfileForm } from "./billing-profile-form";
+import { ChargeActions } from "./charge-actions";
 
 export const metadata: Metadata = { title: "Assinatura" };
 export const dynamic = "force-dynamic";
@@ -51,6 +59,16 @@ export default async function SubscriptionPage() {
         getSubscriptionEvents(membership.storeId),
       ])
     : [[], []];
+
+  let billing: BillingOverview | null = null;
+
+  if (subscription) {
+    try {
+      billing = await getOwnerBillingOverview(membership.storeId);
+    } catch {
+      billing = null;
+    }
+  }
 
   if (!subscription) {
     return (
@@ -180,18 +198,43 @@ export default async function SubscriptionPage() {
 
       <Card>
         <CardHeader
-          title="Cobrança online"
-          description="A cobrança automática será habilitada em uma etapa posterior, após a escolha do gateway."
+          title="Dados de faturamento"
+          description="Informações mínimas usadas pelo Asaas para emitir a cobrança. Sempre validadas no servidor."
         />
-        <CardContent className="space-y-2 text-sm text-zinc-600">
-          <p>
-            Esta etapa não processa pagamentos reais e não coleta dados de cartão. A regularização
-            atual é feita pelo superadministrador da plataforma, com motivo e registro no histórico.
-          </p>
-          <p className="text-xs text-zinc-500">
-            O botão de pagamento só será disponibilizado quando houver um gateway integrado e
-            homologado.
-          </p>
+        <CardContent>
+          {billing ? (
+            <BillingProfileForm profile={billing.profile} />
+          ) : (
+            <Alert variant="warning">
+              Não foi possível carregar os dados de faturamento. Recarregue a página e tente
+              novamente.
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Cobrança pelo Asaas Sandbox"
+          description="Assinatura recorrente mensal com cobranças Pix emitidas pelo Asaas. Nenhum valor real é movimentado nesta homologação."
+        />
+        <CardContent>
+          {billing ? (
+            <ChargeActions
+              connection={billing.connection}
+              profileReady={Boolean(billing.profile)}
+              requestId={crypto.randomUUID()}
+              externalSubscriptionId={billing.external?.externalSubscriptionId ?? null}
+              externalStatus={billing.external?.externalStatus ?? null}
+              lastSyncedAt={billing.external?.lastSyncedAt ?? null}
+              checkout={billing.checkout}
+            />
+          ) : (
+            <p className="text-sm text-zinc-600">
+              A cobrança online fica indisponível enquanto os dados de faturamento não puderem ser
+              carregados.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -215,9 +258,11 @@ export default async function SubscriptionPage() {
                   <tr className="text-left text-xs font-semibold tracking-wide text-zinc-500 uppercase">
                     <th className="px-5 py-3">Período</th>
                     <th className="px-5 py-3">Valor</th>
+                    <th className="px-5 py-3">Meio</th>
                     <th className="px-5 py-3">Status</th>
                     <th className="px-5 py-3">Vencimento</th>
                     <th className="px-5 py-3">Pagamento</th>
+                    <th className="px-5 py-3">Cobrança</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
@@ -228,11 +273,37 @@ export default async function SubscriptionPage() {
                       </td>
                       <td className="px-5 py-3">{formatCurrency(invoice.amountCents)}</td>
                       <td className="px-5 py-3">
-                        {INVOICE_STATUS_LABELS[invoice.status] ?? invoice.status}
+                        {invoice.billingType
+                          ? (BILLING_TYPE_LABELS[invoice.billingType] ?? invoice.billingType)
+                          : "—"}
+                      </td>
+                      <td className="px-5 py-3">
+                        <span className="block">
+                          {INVOICE_STATUS_LABELS[invoice.status] ?? invoice.status}
+                        </span>
+                        {invoice.externalStatus ? (
+                          <span className="block font-mono text-[11px] text-zinc-500">
+                            {invoice.externalStatus}
+                          </span>
+                        ) : null}
                       </td>
                       <td className="px-5 py-3">{formatDate(invoice.dueAt)}</td>
                       <td className="px-5 py-3">
                         {invoice.paidAt ? formatDateTime(invoice.paidAt) : "—"}
+                      </td>
+                      <td className="px-5 py-3">
+                        {invoice.paymentUrl ? (
+                          <a
+                            href={invoice.paymentUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-medium text-orange-700 underline hover:text-orange-800"
+                          >
+                            Abrir
+                          </a>
+                        ) : (
+                          "—"
+                        )}
                       </td>
                     </tr>
                   ))}
