@@ -23,7 +23,11 @@ function fail(message) {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-const apiKey = process.env.ASAAS_API_KEY?.trim();
+// `.env.local` escapes the leading `$` of Asaas keys so Next.js does not
+// interpolate it as an environment variable. Node's --env-file preserves the
+// backslash, so the CLI normalizes it back before calling the provider.
+const apiKeyRaw = process.env.ASAAS_API_KEY?.trim() || "";
+const apiKey = apiKeyRaw[0] === "\\" && apiKeyRaw[1] === "$" ? apiKeyRaw.slice(1) : apiKeyRaw;
 const environment = (process.env.ASAAS_ENVIRONMENT?.trim() || "sandbox").toLowerCase();
 const baseUrl = (process.env.ASAAS_BASE_URL?.trim() || SANDBOX_BASE_URL).replace(/\/+$/, "");
 const userAgent = process.env.ASAAS_USER_AGENT?.trim() || "AVDelivery/1.0";
