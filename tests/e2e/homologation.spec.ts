@@ -104,9 +104,13 @@ test.describe("homologação autenticada", () => {
 
     await page.goto("/admin");
     await expect(page.getByRole("heading", { name: "Estabelecimentos" })).toBeVisible();
-    await expect(page.getByText("Burger Homologação").first()).toBeVisible();
-    await expect(page.getByText("Pizza Homologação").first()).toBeVisible();
     await expect(page.getByText("Superadministrador").first()).toBeVisible();
+
+    await page.goto("/admin?q=Burger");
+    await expect(page.getByText("Burger Homologação").first()).toBeVisible();
+
+    await page.goto("/admin?q=Pizza");
+    await expect(page.getByText("Pizza Homologação").first()).toBeVisible();
   });
 
   test("páginas públicas exibem dados reais sem sessão", async ({ page }) => {
