@@ -3,9 +3,9 @@
 ## Status
 
 **Etapas 1 e 2 homologadas em 2026-10-29; Etapas 3 e 4 homologadas em 2026-10-30; Etapa 5 com
-homologação parcial em 2026-10-31; Etapa 6A implementada e validada em 2026-11-04, sem cobrança
-real**, com um item de endurecimento não bloqueante pendente (proteção de senhas vazadas,
-configuração manual no painel).
+homologação parcial em 2026-10-31; Etapa 6A implementada e validada em 2026-11-04; Etapa 6B
+implementada em 2026-11-04 com HOMOLOGAÇÃO PARCIAL (sem acesso ao Asaas Sandbox)**, com um item de
+endurecimento não bloqueante pendente (proteção de senhas vazadas, configuração manual no painel).
 
 As Etapas 3, 4 e 5 foram validadas contra o projeto Supabase real de homologação, com migrações
 aplicadas, integração, E2E e revisão visual em desktop e mobile. Na Etapa 5, o GPS web em primeiro
@@ -932,3 +932,110 @@ em vencimento, avisos de bloqueio e estado vazio de faturas. Nenhum botão de pa
 Reprodução: os mesmos comandos da seção anterior (`db push`, `npm test`, `npm run test:e2e`,
 `typecheck`, `lint`, `build`, `db lint`). O E2E comercial usa `SUPERADMIN_*` e `SUPABASE_TEST_*` e
 cria/remove suas próprias fixtures.
+
+## Homologação da Etapa 6B — Asaas Sandbox (parcial, 2026-11-04)
+
+### Status
+
+**HOMOLOGAÇÃO PARCIAL.** O código está implementado e testado, mas o ciclo externo real não foi
+executado porque não havia `ASAAS_API_KEY` nem `ASAAS_WEBHOOK_TOKEN` no ambiente. Nenhuma conta foi
+criada, nenhum contrato aceito e nenhuma cobrança real gerada.
+
+### Migrações aplicadas
+
+Aplicadas via `supabase db push --linked`, sem `reset` e sem alterar migrações anteriores (26 no
+total):
+
+1. `20261104120000_billing_schema.sql`
+2. `20261104120100_billing_security.sql`
+3. `20261104120200_billing_functions.sql`
+4. `20261104120300_billing_preserve_paid_at.sql`
+5. `20261104120400_billing_lint_cleanup.sql`
+6. `20261104120500_billing_checkout_amount_guard.sql`
+
+### Resultados reais
+
+- `npm run typecheck`, `npm run lint` e `npm run format:check`: aprovados.
+- `npm test -- --maxWorkers=2` (ou `npx vitest run --maxWorkers=2`): **306 testes, 29 arquivos,
+  todos verdes**.
+- Testes novos de cobrança: 62 unitários + 7 de integração real contra Supabase
+  (`tests/integration/billing.test.ts`), com cliente/assinatura/pagamento simulados
+  (`cus_test_*`, `sub_test_*`, `pay_test_*`) e RPCs reais.
+- `npm run build`: aprovado; a rota `ƒ /api/webhooks/asaas` foi gerada.
+- `npm run test:e2e`: **17 testes verdes**, incluindo a tela Sandbox e o formulário de faturamento.
+- `supabase db lint --linked`: **sem erros** após `20261104120400`.
+- `supabase db advisors --linked`: avisos residuais revisados; os novos são as funções
+  `owner_get_billing_profile`/`owner_upsert_billing_profile`, intencionais para o owner e protegidas
+  por `auth.uid()` + papel. O aviso de `admin_list_store_billing` já existia na 6A.
+- Nenhuma loja preexistente foi removida; as fixtures dos testes são criadas e apagadas no `afterAll`.
+
+### O que foi comprovado no banco real
+
+- RLS: owner vê somente o próprio perfil/checkout; outro owner recebe `forbidden`; escrita direta é
+  negada; `billing_webhook_events` não é legível por `authenticated`.
+- RPCs de serviço não são executáveis pelo owner.
+- Checkout cria assinatura externa e fatura pendente **sem** liberar a loja.
+- Valor adulterado, cliente divergente e assinatura desconhecida são recusados sem alterar dados.
+- Pagamento confirmado grava `paid`, `paid_at`, período e `active`, libera a loja e registra
+  `payment_confirmed` uma única vez.
+- Evento duplicado/atrasado não rebaixa `paid`, não muda `paid_at` e não estende o período.
+- Confirmações concorrentes não duplicam período/evento.
+- Estorno cancela o acesso do período vigente; confirmação atrasada não reativa.
+- Chargeback é registrado; atraso e reativação por novo pagamento funcionam.
+- Chave única de webhook gera `23505` em duplicata.
+- `billing_apply_payment_event` recusa evento de outro cliente/assinatura/valor.
+
+### O que **não** foi comprovado
+
+1. Criação real de cliente/assinatura/cobrança em `api-sandbox.asaas.com`.
+2. Geração e leitura de um Pix real do Sandbox.
+3. Pagamento simulado pelo próprio Asaas.
+4. Webhook externo autenticado percorrendo o ciclo completo até a ativação.
+
+O endpoint foi exercitado apenas de forma local/unitária (token, estrutura, tamanho) e responde
+`503` sem configuração. Ver [billing-sandbox.md](billing-sandbox.md).
+
+### Correções durante a implementação
+
+- `billing_complete_checkout` gravava o id do plano na coluna `currency`; corrigido para ler
+  `plans.currency`.
+- Estorno de período antigo cancelava o acesso vigente; a condição foi restringida ao período atual.
+- `startOwnerCheckout` podia criar duas assinaturas; passou a procurar/reutilizar uma assinatura
+  `ACTIVE` e criar no máximo uma.
+- Evento `PENDING` atrasado reescrevia `paid_at`; corrigido em migração própria para preservar o
+  primeiro instante de liquidação.
+- Webhook podia tratar um `PAYMENT_*` malformado como assinatura; o parser passou a exigir
+  `payment.id`/`subscription.id`.
+- `db lint` apontava variável não usada; removida sem alterar comportamento.
+- Seletor E2E ambíguo em “Dados de faturamento”; ajustado para `heading`.
+
+### Revisão visual
+
+A tela `/dashboard/assinatura` foi validada em E2E: aviso explícito de Sandbox, ausência de “Pagar
+agora” e de “Marcar como paga”, formulário de faturamento, botão de cobrança presente e desabilitado
+sem configuração, estado e histórico preservados. Nenhum segredo é exibido.
+
+### Pendências e limitações
+
+- Homologação externa no Sandbox (itens 1–4 acima).
+- Sem worker/fila/agendador; conciliação manual.
+- Sem cartão, nota fiscal, split, retenção automática ou notificações de cobrança.
+- Trava Sandbox-only precisa de revisão deliberada antes de produção.
+- Ver [billing-production-limits.md](billing-production-limits.md) e [billing-costs.md](billing-costs.md).
+
+### Critérios de aceite da Etapa 6B
+
+- [x] Cliente Asaas Sandbox server-side com timeout, retry, validação e trava de produção.
+- [x] Perfil mínimo, validação e isolamento por loja.
+- [x] Assinatura/cobrança externa com referências únicas e centavos.
+- [x] Criar assinatura **não** libera a loja.
+- [x] Webhook autenticado, durável, idempotente e baseado no estado do provedor.
+- [x] Valor/moeda/cliente/assinatura revalidados; proprietário não marca fatura paga.
+- [x] Atraso, carência, estorno, chargeback e reativação tratados.
+- [x] Conciliação reenviável e auditável.
+- [x] Testes unitários, integração real e E2E; suítes anteriores verdes.
+- [x] Documentação criada e atualizada; segredos não commitados.
+- [ ] Cobrança real no Asaas Sandbox, confirmação do provedor e webhook externo de ponta a ponta.
+- [ ] Produção — explicitamente fora desta etapa.
+
+**Conclusão: HOMOLOGAÇÃO PARCIAL**, conforme o critério da missão.

@@ -4,8 +4,9 @@ Plataforma SaaS multiempresa de delivery para hamburguerias, pizzarias, lanchone
 Comercialização por assinatura mensal por estabelecimento, sem comissão por pedido.
 
 **Status atual: Etapas 1, 2, 3 e 4 homologadas; Etapa 5 com homologação parcial; Etapas 5B e 5C
-com aplicativo Android validado apenas em emulador; Etapa 6A implementada sem cobrança real** em
-projeto Supabase exclusivo de testes (2026-10-29 a 2026-11-04).
+com aplicativo Android validado apenas em emulador; Etapa 6A implementada; Etapa 6B implementada com
+homologação externa parcial (Asaas Sandbox sem credenciais)** em projeto Supabase exclusivo de testes
+(2026-10-29 a 2026-11-04).
 
 A plataforma entrega autenticação, isolamento multiempresa por RLS, painel do estabelecimento,
 superadministrador, cardápio digital com categorias/produtos/adicionais e imagens, página pública
@@ -15,8 +16,11 @@ mobile do entregador e rastreamento GPS em primeiro plano com mapa no acompanham
 Há também um aplicativo Android do entregador com serviço de localização em primeiro plano nativo,
 exercitado em emulador (tela bloqueada de 30 minutos, Doze, perda de rede e processo encerrado),
 ainda sem homologação em aparelho físico. A Etapa 6A adiciona planos, assinaturas, onboarding
-administrativo, período de teste, carência e bloqueio de novas vendas sem acesso comercial, ainda
-**sem gateway nem cobrança real**.
+administrativo, período de teste, carência e bloqueio de novas vendas sem acesso comercial. A Etapa
+6B adiciona cobrança recorrente via **Asaas Sandbox**: perfil de faturamento, cliente/assinatura/
+cobrança Pix, webhook autenticado, conciliação manual e tratamento de atraso/estorno/chargeback. A
+loja só é liberada após um pagamento confirmado e verificado; criar a assinatura não libera. Não há
+cobrança real, contrato ou conta de produção.
 
 > Resultados reais, correções e pendências não bloqueantes: [docs/homologation.md](docs/homologation.md).
 
@@ -149,19 +153,39 @@ migrações. O bucket é público por desenho: não armazene dados privados nele
 
 ### 5. Variáveis de ambiente
 
-| Variável                        | Obrigatória | Uso                                       |
-| ------------------------------- | ----------- | ----------------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`      | sim         | URL do projeto Supabase                   |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | sim         | Chave pública (browser/SSR)               |
-| `SUPABASE_SERVICE_ROLE_KEY`     | scripts     | Bootstrap e seed (nunca no browser)       |
-| `NEXT_PUBLIC_SITE_URL`          | recomendada | Origem usada nos links de autenticação    |
-| `SUPERADMIN_EMAIL`              | bootstrap   | E-mail do superadministrador              |
-| `SUPERADMIN_NAME`               | opcional    | Nome exibido                              |
-| `SUPERADMIN_PASSWORD`           | criação     | Necessária se o usuário ainda não existir |
-| `DEMO_STORE_*` / `DEMO_OWNER_*` | seed        | Dados da loja de demonstração             |
-| `SUPABASE_TEST_*`               | integração  | Projeto de teste local (nunca produção)   |
+| Variável                        | Obrigatória | Uso                                                        |
+| ------------------------------- | ----------- | ---------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`      | sim         | URL do projeto Supabase                                    |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | sim         | Chave pública (browser/SSR)                                |
+| `SUPABASE_SERVICE_ROLE_KEY`     | scripts     | Bootstrap, seed, cobrança e conciliação (nunca no browser) |
+| `ASAAS_API_KEY`                 | cobrança    | Chave do **Sandbox**; produção é rejeitada                 |
+| `ASAAS_WEBHOOK_TOKEN`           | webhook     | Token do header `asaas-access-token` (mínimo 24)           |
+| `ASAAS_ENVIRONMENT`             | opcional    | Deve ser `sandbox`                                         |
+| `ASAAS_BASE_URL`                | opcional    | Somente `https://api-sandbox.asaas.com/v3`                 |
+| `BILLING_RECONCILE_LIMIT`       | opcional    | Assinaturas por execução da conciliação (1–100)            |
+| `NEXT_PUBLIC_SITE_URL`          | recomendada | Origem usada nos links de autenticação                     |
+| `SUPERADMIN_EMAIL`              | bootstrap   | E-mail do superadministrador                               |
+| `SUPERADMIN_NAME`               | opcional    | Nome exibido                                               |
+| `SUPERADMIN_PASSWORD`           | criação     | Necessária se o usuário ainda não existir                  |
+| `DEMO_STORE_*` / `DEMO_OWNER_*` | seed        | Dados da loja de demonstração                              |
+| `SUPABASE_TEST_*`               | integração  | Projeto de teste local (nunca produção)                    |
 
 As variáveis `NEXT_PUBLIC_*` são embutidas no build. Configure-as antes de `npm run build`.
+
+### 6. Integração Asaas Sandbox (opcional)
+
+Para exercitar a cobrança da Etapa 6B:
+
+1. Obtenha a chave do **Sandbox** e defina `ASAAS_API_KEY` no `.env.local`.
+2. Gere um `ASAAS_WEBHOOK_TOKEN` forte (mínimo 24 caracteres) e cadastre o mesmo valor no webhook do
+   Sandbox apontando para `https://SEU-DOMINIO/api/webhooks/asaas`.
+3. Mantenha `ASAAS_ENVIRONMENT=sandbox` e `ASAAS_BASE_URL=https://api-sandbox.asaas.com/v3`.
+   Qualquer credencial/endpoint de produção é rejeitado pelo código.
+4. Rode `npm run dev`, entre como owner e abra `/dashboard/assinatura`.
+
+Sem essas variáveis, a cobrança fica desabilitada e o webhook responde `503`; o restante do produto
+funciona normalmente. O roteiro completo está em [docs/billing-sandbox.md](docs/billing-sandbox.md).
+Nunca commite chaves.
 
 ## Criar o primeiro superadministrador
 
@@ -312,12 +336,14 @@ npm test                 # unitários + integração (integração é ignorada s
 npm run test:e2e         # requer: npx playwright install chromium
 ```
 
-Situação atual: **237 testes Vitest aprovados** (23 arquivos), incluindo os testes de integração da
-Fundação/cardápio, pedidos, entregas, rastreamento e assinaturas, executados com `SUPABASE_TEST_*`.
-A suíte E2E tem **17/17** aprovados, incluindo os fluxos completos de pedidos (entrega e
-retirada/Pix), de entrega em mobile, de rastreamento em 13 passos com GPS simulado e do ciclo
-comercial (cadastro → teste → bloqueio → regularização). O detalhamento está em
-[docs/homologation.md](docs/homologation.md).
+Situação atual: **306 testes Vitest aprovados** (29 arquivos), incluindo os testes de integração da
+Fundação/cardápio, pedidos, entregas, rastreamento, assinaturas e cobrança Sandbox, executados com
+`SUPABASE_TEST_*`. Os 7 testes de cobrança usam RPCs reais com pagamentos **simulados**
+(`cus_test_*`, `sub_test_*`, `pay_test_*`); não são teste externo do Asaas. A suíte E2E tem
+**17/17** aprovados, incluindo os fluxos completos de pedidos (entrega e retirada/Pix), de entrega em
+mobile, de rastreamento em 13 passos com GPS simulado e do ciclo comercial (cadastro → teste →
+bloqueio → regularização), além da tela Sandbox e do formulário de faturamento. O detalhamento está
+em [docs/homologation.md](docs/homologation.md).
 
 O Vitest e o Playwright carregam `.env.local` automaticamente. O E2E autenticado da Fundação
 (`tests/e2e/homologation.spec.ts`) é ignorado quando as credenciais `DEMO_*`/`SUPERADMIN_*` não estão
@@ -397,19 +423,20 @@ isenção, preservação do último owner e listagem administrativa. O E2E
 
 ## Scripts
 
-| Comando                        | Descrição                       |
-| ------------------------------ | ------------------------------- |
-| `npm run dev`                  | Servidor de desenvolvimento     |
-| `npm run build`                | Build de produção               |
-| `npm start`                    | Servidor de produção            |
-| `npm run typecheck`            | TypeScript sem emitir           |
-| `npm run lint`                 | ESLint                          |
-| `npm test`                     | Vitest                          |
-| `npm run test:e2e`             | Playwright                      |
-| `npm run format`               | Prettier                        |
-| `npm run bootstrap:superadmin` | Cria/promove superadministrador |
-| `npm run seed:demo`            | Cria loja de demonstração       |
-| `npm run storage:setup`        | Cria/atualiza bucket de imagens |
+| Comando                        | Descrição                                                              |
+| ------------------------------ | ---------------------------------------------------------------------- |
+| `npm run dev`                  | Servidor de desenvolvimento                                            |
+| `npm run build`                | Build de produção                                                      |
+| `npm start`                    | Servidor de produção                                                   |
+| `npm run typecheck`            | TypeScript sem emitir                                                  |
+| `npm run lint`                 | ESLint                                                                 |
+| `npm test`                     | Vitest                                                                 |
+| `npm run test:e2e`             | Playwright                                                             |
+| `npm run format`               | Prettier                                                               |
+| `npm run bootstrap:superadmin` | Cria/promove superadministrador                                        |
+| `npm run seed:demo`            | Cria loja de demonstração                                              |
+| `npm run storage:setup`        | Cria/atualiza bucket de imagens                                        |
+| `npm run billing:reconcile`    | Concilia assinaturas com o Asaas Sandbox (`-- --dry-run` para simular) |
 
 ## Estrutura
 
@@ -467,6 +494,15 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - [Aplicativo Android do entregador](docs/gps-android.md)
 - [Custos do GPS](docs/gps-costs.md)
 - [Assinaturas e administração comercial](docs/subscriptions.md)
+- [Integração Asaas Sandbox](docs/asaas-integration.md)
+- [Fluxo de pagamento](docs/billing-payment-flow.md)
+- [Webhooks](docs/webhooks.md)
+- [Idempotência](docs/billing-idempotency.md)
+- [Conciliação](docs/billing-reconciliation.md)
+- [Inadimplência e estornos](docs/billing-delinquency.md)
+- [Homologação no Asaas Sandbox](docs/billing-sandbox.md)
+- [Limitações de produção](docs/billing-production-limits.md)
+- [Custos e taxas](docs/billing-costs.md)
 - [Gateways de cobrança](docs/billing-providers.md)
 - [Homologação](docs/homologation.md)
 - [Roadmap](docs/roadmap.md)
@@ -476,8 +512,16 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - Não há convite de equipe por token; o vínculo é feito pelo superadministrador com usuário já
   existente.
 - Não há gestão de funcionários na interface (apenas o modelo e as políticas).
-- Assinatura sem cobrança real: não há gateway, emissão automática de fatura, pagamento online,
-  estorno, conciliação ou nota fiscal. O botão de pagamento não é exibido.
+- Cobrança somente em **Asaas Sandbox**, com homologação externa parcial: sem credenciais reais, não
+  houve cobrança no Sandbox, confirmação simulada pelo provedor nem webhook externo de ponta a ponta.
+- Não há worker/fila/agendador de cobrança; webhooks são síncronos e a conciliação é manual
+  (`npm run billing:reconcile`). Não há alerta automático de falha.
+- Cobrança por Pix é pagamento por ciclo, **não débito automático**. Não há cartão, nota fiscal,
+  split, repasse, multa/juros, cobrança retroativa ou autoatendimento de troca de plano.
+- O proprietário não marca faturas como pagas; só um pagamento confirmado e verificado libera a loja.
+- O código rejeita endpoints/credenciais de produção; ativar produção exige uma revisão deliberada e
+  está fora desta etapa.
+- A cobrança não apaga dados, não altera migrações anteriores e não mexe em lojas preexistentes.
 - O bloqueio comercial impede **novos pedidos**, mas não apaga nem oculta pedidos, cardápio ou dados
   históricos; o painel e o cardápio continuam acessíveis.
 - A isenção de lojas preexistentes é explícita e auditada; não há isenção automática para lojas
@@ -491,8 +535,10 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - A validação real de conteúdo da imagem ocorre na rota do app; uploads diretos na Storage API por
   gestores validam apenas o MIME declarado e o limite do bucket.
 - Sem carrinho off-line ou sincronização entre dispositivos: o carrinho fica no `localStorage`.
-- Sem gateway de pagamento, cobrança automática, conciliação, impressão térmica, cupom ou desconto.
-- Pix é manual e nunca é marcado como pago automaticamente.
+- Sem gateway de produção, cobrança automática em cartão, conciliação automática, impressão térmica,
+  cupom ou desconto. A integração Asaas Sandbox está implementada, mas não homologada externamente.
+- Pix da assinatura é gerado no Asaas; o AVDelivery não marca pagamento sem consultar o provedor.
+  Pix de pedido no checkout continua manual e independente da assinatura.
 - GPS web apenas em primeiro plano: com tela bloqueada ou navegador em segundo plano, o envio pode
   parar. O app Android (Etapas 5B/5C) mitiga isso com serviço nativo, mas foi validado apenas em
   emulador; não há homologação em dispositivo físico nem em iOS.
@@ -522,9 +568,11 @@ Detalhes completos em [docs/security.md](docs/security.md).
 
 ## Próxima etapa recomendada
 
-As Etapas 1 a 4 estão homologadas, a Etapa 5 tem homologação web parcial e a Etapa 6A está
-implementada sem cobrança real. A Etapa 6B — cobrança real — é o próximo escopo e **não foi
-iniciada**: exige escolher/contratar gateway, implementar webhooks e homologar pagamento em sandbox.
-A recomendação inicial de gateway está em [docs/billing-providers.md](docs/billing-providers.md).
+As Etapas 1 a 4 estão homologadas, a Etapa 5 tem homologação web parcial, a Etapa 6A está
+implementada e a Etapa 6B está implementada com **homologação externa parcial** no Asaas Sandbox.
+Antes de avançar, concluir o roteiro de [docs/billing-sandbox.md](docs/billing-sandbox.md) com
+credenciais Sandbox e revisar [docs/billing-production-limits.md](docs/billing-production-limits.md).
+A Etapa 7 (endurecimento) e a ativação de produção não foram iniciadas. A recomendação de gateway
+continua em [docs/billing-providers.md](docs/billing-providers.md).
 Antes de retomar rastreamento, recomenda-se validar o app Android em aparelho físico e decidir sobre
 iOS.

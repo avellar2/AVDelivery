@@ -50,6 +50,11 @@ plans 1:N subscriptions
 stores 1:0..1 subscriptions    (unique store_id)
 subscriptions 1:N invoices
 stores 1:N subscription_events (FK composta store_id + subscription_id)
+stores 1:1 billing_customers   (dados mínimos + id externo)
+stores 1:N billing_checkout_requests
+subscriptions 1:N billing_checkout_requests
+invoices 1:0..1 external payment (unique provider + external_payment_id)
+billing_webhook_events         (caixa de entrada isolada, sem store_id)
 ```
 
 ## Tipos
@@ -68,7 +73,7 @@ create type public.subscription_status as enum (
   'trialing', 'active', 'grace', 'expired', 'canceled'
 );
 create type public.invoice_status as enum (
-  'pending', 'paid', 'overdue', 'canceled', 'refunded'
+  'pending', 'paid', 'overdue', 'canceled', 'refunded', 'chargeback'
 );
 ```
 
@@ -458,27 +463,95 @@ noturno alterando o status.
 | `current_period_start/end`         | `timestamptz`         | fim estritamente posterior ao início                   |
 | `grace_ends_at`                    | `timestamptz`         | fim da carência                                        |
 | `canceled_at`                      | `timestamptz`         | obrigatório quando `status = 'canceled'`               |
+| `external_provider`                | `text`                | provedor externo, hoje `asaas`                         |
+| `external_subscription_id`         | `text`                | id da assinatura no provedor; único por provedor       |
+| `external_status`                  | `text`                | status bruto informado pelo provedor                   |
+| `last_synced_at`                   | `timestamptz`         | última verificação no provedor                         |
 | `created_at`/`updated_at`          | `timestamptz`         | `now()`; trigger `set_updated_at`                      |
 
 `unique (store_id, id)` existe para permitir as FKs compostas de faturas e eventos.
 
 ### `invoices`
 
-Faturas administrativas/manuais. Não há emissão automática nem cobrança nesta etapa.
+Faturas emitidas pelo checkout da Etapa 6B ou registradas pela conciliação. O status `paid` só é
+gravado com um pagamento externo verificável e `paid_at`.
 
-| Coluna               | Tipo             | Regras                                                        |
-| -------------------- | ---------------- | ------------------------------------------------------------- |
-| `id`                 | `uuid`           | PK                                                            |
-| `store_id`           | `uuid`           | `not null`; FK `stores(id)` `on delete cascade`               |
-| `subscription_id`    | `uuid`           | FK composta `(store_id, subscription_id)` `on delete cascade` |
-| `amount_cents`       | `bigint`         | 1–100.000.000                                                 |
-| `currency`           | `char(3)`        | `BRL` por padrão                                              |
-| `status`             | `invoice_status` | `pending` por padrão                                          |
-| `period_start/end`   | `timestamptz`    | `period_end > period_start`                                   |
-| `due_at`             | `timestamptz`    | vencimento                                                    |
-| `paid_at`            | `timestamptz`    | obrigatório **se e somente se** `status = 'paid'`             |
-| `external_provider`  | `text`           | gateway, quando houver                                        |
-| `external_reference` | `text`           | único por provedor, quando ambos existem                      |
+| Coluna                | Tipo             | Regras                                                        |
+| --------------------- | ---------------- | ------------------------------------------------------------- |
+| `id`                  | `uuid`           | PK                                                            |
+| `store_id`            | `uuid`           | `not null`; FK `stores(id)` `on delete cascade`               |
+| `subscription_id`     | `uuid`           | FK composta `(store_id, subscription_id)` `on delete cascade` |
+| `amount_cents`        | `bigint`         | 1–100.000.000                                                 |
+| `currency`            | `char(3)`        | `BRL` por padrão                                              |
+| `status`              | `invoice_status` | `pending` por padrão; inclui `chargeback`                     |
+| `period_start/end`    | `timestamptz`    | `period_end > period_start`                                   |
+| `due_at`              | `timestamptz`    | vencimento                                                    |
+| `paid_at`             | `timestamptz`    | obrigatório **se e somente se** `status = 'paid'`             |
+| `external_provider`   | `text`           | gateway, hoje `asaas`                                         |
+| `external_reference`  | `text`           | referência externa                                            |
+| `external_payment_id` | `text`           | id da cobrança no provedor; único por provedor                |
+| `billing_type`        | `text`           | `PIX`, `BOLETO`, `CREDIT_CARD` ou `UNDEFINED`                 |
+| `external_status`     | `text`           | status bruto do provedor                                      |
+| `payment_url`         | `text`           | link HTTPS hospedado no provedor                              |
+| `pix_payload`         | `text`           | Pix copia e cola, quando disponível                           |
+| `external_created_at` | `timestamptz`    | criação no provedor                                           |
+
+### `billing_customers`
+
+Um cliente de cobrança por loja, com dados mínimos e referência externa.
+
+| Coluna                  | Tipo          | Regras                                                 |
+| ----------------------- | ------------- | ------------------------------------------------------ |
+| `id`                    | `uuid`        | PK                                                     |
+| `store_id`              | `uuid`        | `not null`, único, FK `stores(id)` `on delete cascade` |
+| `provider`              | `text`        | `asaas`                                                |
+| `external_customer_id`  | `text`        | único por provedor quando presente                     |
+| `legal_name`            | `text`        | 2–160 caracteres                                       |
+| `document`              | `text`        | 11 (CPF) ou 14 (CNPJ) dígitos                          |
+| `email`                 | `text`        | e-mail válido, até 254 caracteres                      |
+| `phone`                 | `text`        | 10–13 dígitos                                          |
+| `postal_code`           | `text`        | 8 dígitos, opcional                                    |
+| `address/number`        | `text`        | opcionais; número obrigatório se houver endereço       |
+| `province`              | `text`        | opcional                                               |
+| `status`                | `text`        | marcador local, opcional                               |
+| `created_at/updated_at` | `timestamptz` | `now()`; trigger `set_updated_at`                      |
+
+### `billing_checkout_requests`
+
+Tentativas idempotentes de criação de assinatura/cobrança.
+
+| Coluna                     | Tipo          | Regras                                     |
+| -------------------------- | ------------- | ------------------------------------------ |
+| `id`                       | `uuid`        | PK                                         |
+| `store_id`                 | `uuid`        | FK `stores(id)` `on delete cascade`        |
+| `subscription_id`          | `uuid`        | FK composta `(store_id, subscription_id)`  |
+| `request_id`               | `uuid`        | único por loja                             |
+| `status`                   | `text`        | `creating`, `created`, `failed`, `expired` |
+| `external_subscription_id` | `text`        | assinatura criada no provedor              |
+| `first_payment_id`         | `text`        | primeira cobrança                          |
+| `payment_url`              | `text`        | HTTPS, até 1000 caracteres                 |
+| `pix_payload`              | `text`        | até 4000 caracteres                        |
+| `error_message`            | `text`        | mensagem pública, sem segredo              |
+| `expires_at`               | `timestamptz` | expiração da requisição                    |
+| `created_at/updated_at`    | `timestamptz` | `now()`; trigger `set_updated_at`          |
+
+### `billing_webhook_events`
+
+Caixa de entrada durável e idempotente de webhooks. Sem acesso para `authenticated`/`anon`.
+
+| Coluna              | Tipo          | Regras                                                     |
+| ------------------- | ------------- | ---------------------------------------------------------- |
+| `id`                | `uuid`        | PK                                                         |
+| `provider`          | `text`        | `asaas`                                                    |
+| `external_event_id` | `text`        | único por provedor                                         |
+| `event_type`        | `text`        | maiúsculas, formato de evento                              |
+| `resource_type/id`  | `text`        | `payment`, `subscription` ou nulo                          |
+| `payload`           | `jsonb`       | objeto bruto para auditoria/reprocessamento                |
+| `status`            | `text`        | `received`, `processing`, `processed`, `ignored`, `failed` |
+| `attempts`          | `integer`     | tentativas de processamento                                |
+| `last_error`        | `text`        | até 1000 caracteres, sem segredo                           |
+| `received_at`       | `timestamptz` | recebimento                                                |
+| `processed_at`      | `timestamptz` | conclusão                                                  |
 
 ### `subscription_events`
 
@@ -496,6 +569,19 @@ cascata é permitido somente quando a loja já foi removida (migração `2026110
 | `metadata`        | `jsonb`       | objeto, padrão `{}`                             |
 | `dedupe_key`      | `text`        | único quando presente, para idempotência        |
 | `created_at`      | `timestamptz` | `now()`                                         |
+
+### Migrações da Etapa 6B
+
+- `20261104120000_billing_schema.sql` — `chargeback`, tabelas de cliente/checkout/webhook, colunas
+  externas em assinaturas e faturas, restrições e índices.
+- `20261104120100_billing_security.sql` — RLS e grants; RPCs de serviço revogadas de
+  `anon`/`authenticated`.
+- `20261104120200_billing_functions.sql` — perfil do owner, vínculo de cliente, checkout,
+  aplicação de pagamento, status externo e candidatos de conciliação.
+- `20261104120300_billing_preserve_paid_at.sql` — preserva `paid_at` original em evento atrasado.
+- `20261104120400_billing_lint_cleanup.sql` — remove variável não usada apontada pelo `db lint`.
+- `20261104120500_billing_checkout_amount_guard.sql` — recusa checkout cuja cobrança não corresponda
+  exatamente ao preço do plano.
 
 ### Migrações da Etapa 6A
 
@@ -540,89 +626,107 @@ cascata é permitido somente quando a loja já foi removida (migração `2026110
 
 ## Índices
 
-| Índice                                                     | Tabela                  | Motivo                                   |
-| ---------------------------------------------------------- | ----------------------- | ---------------------------------------- |
-| `stores_slug_key` (unique)                                 | `stores`                | busca pública por slug e unicidade       |
-| `stores_active_idx`                                        | `stores`                | filtro de lojas ativas na página pública |
-| `store_memberships_store_user_key` (unique)                | `store_memberships`     | unicidade do vínculo                     |
-| `store_memberships_user_id_idx`                            | `store_memberships`     | listar lojas de um usuário               |
-| `categories_store_sort_idx`                                | `categories`            | ordenação por loja                       |
-| `categories_store_active_idx`                              | `categories`            | filtro público/gestão                    |
-| `products_store_category_sort_idx`                         | `products`              | listagem por categoria                   |
-| `products_store_available_idx`                             | `products`              | filtro público                           |
-| `option_groups_store_active_idx`                           | `option_groups`         | filtro público                           |
-| `product_option_groups_store_idx`                          | `product_option_groups` | gestão por loja                          |
-| `product_option_groups_group_idx`                          | `product_option_groups` | associações por grupo                    |
-| `product_options_store_group_sort_idx`                     | `product_options`       | opções por grupo                         |
-| `product_options_store_available_idx`                      | `product_options`       | filtro público                           |
-| `customers_store_phone_idx`                                | `customers`             | busca/upsert por telefone                |
-| `orders_store_status_created_idx`                          | `orders`                | fila por status e data                   |
-| `orders_store_created_idx`                                 | `orders`                | listagem por loja                        |
-| `orders_store_phone_created_idx`                           | `orders`                | rate limit por telefone                  |
-| `order_items_order_idx` / `order_items_store_idx`          | `order_items`           | itens por pedido e por loja              |
-| `order_item_options_item_idx` / `_store_idx`               | `order_item_options`    | adicionais por item e por loja           |
-| `order_events_order_created_idx` / `_store_created_idx`    | `order_events`          | histórico por pedido e por loja          |
-| `driver_profiles_store_active_idx`                         | `driver_profiles`       | entregadores ativos por loja             |
-| `driver_profiles_user_idx`                                 | `driver_profiles`       | lojas de um entregador                   |
-| `deliveries_one_active_per_order_idx` (unique, parcial)    | `deliveries`            | no máximo uma entrega ativa por pedido   |
-| `deliveries_store_status_idx`                              | `deliveries`            | fila/gestão por loja e estado            |
-| `deliveries_driver_status_idx`                             | `deliveries`            | painel do entregador                     |
-| `deliveries_order_created_idx`                             | `deliveries`            | histórico do pedido                      |
-| `delivery_events_delivery_created_idx`                     | `delivery_events`       | histórico da entrega                     |
-| `delivery_events_order_created_idx` / `_store_created_idx` | `delivery_events`       | histórico por pedido e por loja          |
-| `delivery_locations_store_updated_idx`                     | `delivery_locations`    | posições ativas por loja                 |
+| Índice                                                     | Tabela                      | Motivo                                   |
+| ---------------------------------------------------------- | --------------------------- | ---------------------------------------- |
+| `stores_slug_key` (unique)                                 | `stores`                    | busca pública por slug e unicidade       |
+| `stores_active_idx`                                        | `stores`                    | filtro de lojas ativas na página pública |
+| `store_memberships_store_user_key` (unique)                | `store_memberships`         | unicidade do vínculo                     |
+| `store_memberships_user_id_idx`                            | `store_memberships`         | listar lojas de um usuário               |
+| `categories_store_sort_idx`                                | `categories`                | ordenação por loja                       |
+| `categories_store_active_idx`                              | `categories`                | filtro público/gestão                    |
+| `products_store_category_sort_idx`                         | `products`                  | listagem por categoria                   |
+| `products_store_available_idx`                             | `products`                  | filtro público                           |
+| `option_groups_store_active_idx`                           | `option_groups`             | filtro público                           |
+| `product_option_groups_store_idx`                          | `product_option_groups`     | gestão por loja                          |
+| `product_option_groups_group_idx`                          | `product_option_groups`     | associações por grupo                    |
+| `product_options_store_group_sort_idx`                     | `product_options`           | opções por grupo                         |
+| `product_options_store_available_idx`                      | `product_options`           | filtro público                           |
+| `customers_store_phone_idx`                                | `customers`                 | busca/upsert por telefone                |
+| `orders_store_status_created_idx`                          | `orders`                    | fila por status e data                   |
+| `orders_store_created_idx`                                 | `orders`                    | listagem por loja                        |
+| `orders_store_phone_created_idx`                           | `orders`                    | rate limit por telefone                  |
+| `order_items_order_idx` / `order_items_store_idx`          | `order_items`               | itens por pedido e por loja              |
+| `order_item_options_item_idx` / `_store_idx`               | `order_item_options`        | adicionais por item e por loja           |
+| `order_events_order_created_idx` / `_store_created_idx`    | `order_events`              | histórico por pedido e por loja          |
+| `driver_profiles_store_active_idx`                         | `driver_profiles`           | entregadores ativos por loja             |
+| `driver_profiles_user_idx`                                 | `driver_profiles`           | lojas de um entregador                   |
+| `deliveries_one_active_per_order_idx` (unique, parcial)    | `deliveries`                | no máximo uma entrega ativa por pedido   |
+| `deliveries_store_status_idx`                              | `deliveries`                | fila/gestão por loja e estado            |
+| `deliveries_driver_status_idx`                             | `deliveries`                | painel do entregador                     |
+| `deliveries_order_created_idx`                             | `deliveries`                | histórico do pedido                      |
+| `delivery_events_delivery_created_idx`                     | `delivery_events`           | histórico da entrega                     |
+| `delivery_events_order_created_idx` / `_store_created_idx` | `delivery_events`           | histórico por pedido e por loja          |
+| `delivery_locations_store_updated_idx`                     | `delivery_locations`        | posições ativas por loja                 |
+| `subscriptions_external_key` (unique, parcial)             | `subscriptions`             | uma assinatura por id externo/provedor   |
+| `billing_customers_external_key` (unique, parcial)         | `billing_customers`         | um cliente por id externo/provedor       |
+| `billing_checkout_requests_request_key` (unique)           | `billing_checkout_requests` | idempotência por loja/requisição         |
+| `billing_checkout_requests_active_idx`                     | `billing_checkout_requests` | checkout recente por loja                |
+| `billing_checkout_requests_external_idx`                   | `billing_checkout_requests` | busca por assinatura externa             |
+| `billing_webhook_events_key` (unique)                      | `billing_webhook_events`    | deduplicação de webhook                  |
+| `billing_webhook_events_status_idx`                        | `billing_webhook_events`    | reprocessamento por estado               |
+| `invoices_external_payment_key` (unique)                   | `invoices`                  | uma fatura por pagamento externo         |
+| `invoices_external_status_idx`                             | `invoices`                  | consulta por status externo              |
 
 ## Funções e triggers
 
-| Objeto                                            | Tipo                                           | Função                                                                                    |
-| ------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `set_updated_at()`                                | trigger                                        | atualiza `updated_at` em `profiles`, `stores`, `categories`, `products` e `option_groups` |
-| `handle_new_user()`                               | trigger `security definer`                     | cria `profiles` ao inserir em `auth.users`                                                |
-| `private.is_platform_admin()`                     | função `security definer`                      | testa o vínculo do usuário atual em `platform_admins`                                     |
-| `private.is_store_member(uuid)`                   | função `security definer`                      | testa vínculo do usuário atual com a loja                                                 |
-| `private.has_store_role(uuid, role[])`            | função `security definer`                      | testa vínculo com um dos papéis                                                           |
-| `private.prevent_store_id_change()`               | trigger                                        | impede alterar `store_id` nas tabelas do cardápio                                         |
-| `private.storage_store_id(text)`                  | função `stable`                                | extrai o `store_id` do caminho do Storage                                                 |
-| `prevent_membership_identity_change()`            | trigger                                        | impede alterar `store_id`/`user_id`                                                       |
-| `ensure_store_has_owner()`                        | constraint trigger diferido `security definer` | impede remover o último `owner` de uma loja existente                                     |
-| `protect_store_active_flag()`                     | trigger                                        | apenas `owner` (ou admin) altera `active`                                                 |
-| `private.guard_order_update()`                    | trigger                                        | congela dados comerciais do pedido; só status/pagamento mudam                             |
-| `private.guard_order_child_insert()`              | trigger                                        | impede item com `store_id` diferente do pedido                                            |
-| `private.guard_order_event_insert()`              | trigger                                        | impede evento com `store_id` diferente do pedido                                          |
-| `public.create_order(...)`                        | RPC `security definer`                         | checkout transacional: valida, recalcula preços, grava cliente/pedido/itens/evento        |
-| `public.get_order_tracking(...)`                  | RPC `security definer stable`                  | consulta pública por slug + número + hash do token                                        |
-| `public.update_order_status(...)`                 | RPC `security definer`                         | valida papel, transição e concorrência; grava evento                                      |
-| `public.update_order_payment_status(...)`         | RPC `security definer`                         | altera somente o pagamento, com transições próprias                                       |
-| `private.guard_driver_profile_update()`           | trigger                                        | congela identidade do perfil (`id`, loja, usuário, criação)                               |
-| `private.guard_driver_profile_membership()`       | trigger `security definer`                     | exige vínculo `driver` na mesma loja                                                      |
-| `private.guard_driver_membership_role()`          | trigger `security definer`                     | impede trocar papel de quem tem perfil de entregador                                      |
-| `private.guard_delivery_update()`                 | trigger                                        | congela pedido/entregador/autor/data da entrega                                           |
-| `private.guard_delivery_event_insert()`           | trigger `security definer`                     | exige evento coerente com a entrega                                                       |
-| `private.guard_delivery_event_update()`           | trigger                                        | recusa qualquer alteração no histórico                                                    |
-| `private.sync_delivery_from_order_status()`       | trigger `security definer`                     | sincroniza entregas quando o pedido é cancelado/entregue manualmente                      |
-| `public.create_driver(...)`                       | RPC `security definer`                         | cria vínculo `driver` + perfil do entregador na mesma transação                           |
-| `public.update_driver(...)`                       | RPC `security definer`                         | edita nome/telefone e ativa/desativa; bloqueia desativação com entregas ativas            |
-| `public.assign_delivery(...)`                     | RPC `security definer`                         | atribui entregador ativo da loja a pedido de entrega; idempotente para o mesmo entregador |
-| `public.reassign_delivery(...)`                   | RPC `security definer`                         | encerra a entrega atual e cria outra com motivo e eventos                                 |
-| `public.start_delivery(...)`                      | RPC `security definer`                         | `assigned → picked_up` e `ready → out_for_delivery` na mesma transação                    |
-| `public.complete_delivery(...)`                   | RPC `security definer`                         | `picked_up → delivered` e `out_for_delivery → delivered`                                  |
-| `public.cancel_delivery(...)`                     | RPC `security definer`                         | cancela atribuição antes da coleta                                                        |
-| `private.clear_delivery_location_on_close()`      | trigger `security definer`                     | apaga a posição quando a entrega é concluída ou cancelada                                 |
-| `public.share_delivery_location(...)`             | RPC `security definer`                         | valida entregador, vínculo, pedido, coordenadas, precisão e horário; grava a posição      |
-| `public.get_driver_delivery_location(...)`        | RPC `security definer stable`                  | devolve a posição somente ao entregador dono da entrega                                   |
-| `public.clear_delivery_location(...)`             | RPC `security definer`                         | remove a posição ao parar o compartilhamento                                              |
-| `private.effective_subscription_state(uuid)`      | função `stable`                                | deriva `trialing/active/grace/expired/canceled/exempt/missing/inactive` das datas         |
-| `private.store_has_commercial_access(uuid)`       | função `stable`                                | fonte única do acesso comercial                                                           |
-| `private.create_default_subscription_for_store()` | trigger `security definer`                     | cria assinatura `trialing` ao inserir loja e registra evento                              |
-| `public.get_store_commercial_status(text)`        | RPC `security definer stable`                  | status público pelo slug (vitrine)                                                        |
-| `public.get_store_subscription(uuid)`             | RPC `security definer stable`                  | assinatura para o owner e o superadministrador                                            |
-| `public.admin_list_store_billing()`               | RPC `security definer stable`                  | lista administrativa com estado efetivo                                                   |
-| `public.admin_create_store(...)`                  | RPC `security definer`                         | cria loja + assinatura + owner + eventos em uma transação                                 |
-| `public.admin_add_store_owner(...)`               | RPC `security definer`                         | vincula owner existente, preservando o último owner                                       |
-| `public.admin_update_store(...)`                  | RPC `security definer`                         | edita dados administrativos com auditoria                                                 |
-| `public.admin_update_subscription(...)`           | RPC `security definer`                         | ativa/renova, concede carência, expira, cancela, isenta e troca plano                     |
-| `private.guard_order_commercial_access()`         | trigger `before insert` em `orders`            | recusa novo pedido sem acesso comercial com `subscription_inactive`                       |
-| `private.subscription_events_immutable()`         | trigger                                        | bloqueia `UPDATE`/`DELETE` avulso; permite cascata quando a loja não existe               |
+| Objeto                                                    | Tipo                                           | Função                                                                                    |
+| --------------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `set_updated_at()`                                        | trigger                                        | atualiza `updated_at` em `profiles`, `stores`, `categories`, `products` e `option_groups` |
+| `handle_new_user()`                                       | trigger `security definer`                     | cria `profiles` ao inserir em `auth.users`                                                |
+| `private.is_platform_admin()`                             | função `security definer`                      | testa o vínculo do usuário atual em `platform_admins`                                     |
+| `private.is_store_member(uuid)`                           | função `security definer`                      | testa vínculo do usuário atual com a loja                                                 |
+| `private.has_store_role(uuid, role[])`                    | função `security definer`                      | testa vínculo com um dos papéis                                                           |
+| `private.prevent_store_id_change()`                       | trigger                                        | impede alterar `store_id` nas tabelas do cardápio                                         |
+| `private.storage_store_id(text)`                          | função `stable`                                | extrai o `store_id` do caminho do Storage                                                 |
+| `prevent_membership_identity_change()`                    | trigger                                        | impede alterar `store_id`/`user_id`                                                       |
+| `ensure_store_has_owner()`                                | constraint trigger diferido `security definer` | impede remover o último `owner` de uma loja existente                                     |
+| `protect_store_active_flag()`                             | trigger                                        | apenas `owner` (ou admin) altera `active`                                                 |
+| `private.guard_order_update()`                            | trigger                                        | congela dados comerciais do pedido; só status/pagamento mudam                             |
+| `private.guard_order_child_insert()`                      | trigger                                        | impede item com `store_id` diferente do pedido                                            |
+| `private.guard_order_event_insert()`                      | trigger                                        | impede evento com `store_id` diferente do pedido                                          |
+| `public.create_order(...)`                                | RPC `security definer`                         | checkout transacional: valida, recalcula preços, grava cliente/pedido/itens/evento        |
+| `public.get_order_tracking(...)`                          | RPC `security definer stable`                  | consulta pública por slug + número + hash do token                                        |
+| `public.update_order_status(...)`                         | RPC `security definer`                         | valida papel, transição e concorrência; grava evento                                      |
+| `public.update_order_payment_status(...)`                 | RPC `security definer`                         | altera somente o pagamento, com transições próprias                                       |
+| `private.guard_driver_profile_update()`                   | trigger                                        | congela identidade do perfil (`id`, loja, usuário, criação)                               |
+| `private.guard_driver_profile_membership()`               | trigger `security definer`                     | exige vínculo `driver` na mesma loja                                                      |
+| `private.guard_driver_membership_role()`                  | trigger `security definer`                     | impede trocar papel de quem tem perfil de entregador                                      |
+| `private.guard_delivery_update()`                         | trigger                                        | congela pedido/entregador/autor/data da entrega                                           |
+| `private.guard_delivery_event_insert()`                   | trigger `security definer`                     | exige evento coerente com a entrega                                                       |
+| `private.guard_delivery_event_update()`                   | trigger                                        | recusa qualquer alteração no histórico                                                    |
+| `private.sync_delivery_from_order_status()`               | trigger `security definer`                     | sincroniza entregas quando o pedido é cancelado/entregue manualmente                      |
+| `public.create_driver(...)`                               | RPC `security definer`                         | cria vínculo `driver` + perfil do entregador na mesma transação                           |
+| `public.update_driver(...)`                               | RPC `security definer`                         | edita nome/telefone e ativa/desativa; bloqueia desativação com entregas ativas            |
+| `public.assign_delivery(...)`                             | RPC `security definer`                         | atribui entregador ativo da loja a pedido de entrega; idempotente para o mesmo entregador |
+| `public.reassign_delivery(...)`                           | RPC `security definer`                         | encerra a entrega atual e cria outra com motivo e eventos                                 |
+| `public.start_delivery(...)`                              | RPC `security definer`                         | `assigned → picked_up` e `ready → out_for_delivery` na mesma transação                    |
+| `public.complete_delivery(...)`                           | RPC `security definer`                         | `picked_up → delivered` e `out_for_delivery → delivered`                                  |
+| `public.cancel_delivery(...)`                             | RPC `security definer`                         | cancela atribuição antes da coleta                                                        |
+| `private.clear_delivery_location_on_close()`              | trigger `security definer`                     | apaga a posição quando a entrega é concluída ou cancelada                                 |
+| `public.share_delivery_location(...)`                     | RPC `security definer`                         | valida entregador, vínculo, pedido, coordenadas, precisão e horário; grava a posição      |
+| `public.get_driver_delivery_location(...)`                | RPC `security definer stable`                  | devolve a posição somente ao entregador dono da entrega                                   |
+| `public.clear_delivery_location(...)`                     | RPC `security definer`                         | remove a posição ao parar o compartilhamento                                              |
+| `private.effective_subscription_state(uuid)`              | função `stable`                                | deriva `trialing/active/grace/expired/canceled/exempt/missing/inactive` das datas         |
+| `private.store_has_commercial_access(uuid)`               | função `stable`                                | fonte única do acesso comercial                                                           |
+| `private.create_default_subscription_for_store()`         | trigger `security definer`                     | cria assinatura `trialing` ao inserir loja e registra evento                              |
+| `public.get_store_commercial_status(text)`                | RPC `security definer stable`                  | status público pelo slug (vitrine)                                                        |
+| `public.get_store_subscription(uuid)`                     | RPC `security definer stable`                  | assinatura para o owner e o superadministrador                                            |
+| `public.admin_list_store_billing()`                       | RPC `security definer stable`                  | lista administrativa com estado efetivo                                                   |
+| `public.admin_create_store(...)`                          | RPC `security definer`                         | cria loja + assinatura + owner + eventos em uma transação                                 |
+| `public.admin_add_store_owner(...)`                       | RPC `security definer`                         | vincula owner existente, preservando o último owner                                       |
+| `public.admin_update_store(...)`                          | RPC `security definer`                         | edita dados administrativos com auditoria                                                 |
+| `public.admin_update_subscription(...)`                   | RPC `security definer`                         | ativa/renova, concede carência, expira, cancela, isenta e troca plano                     |
+| `private.guard_order_commercial_access()`                 | trigger `before insert` em `orders`            | recusa novo pedido sem acesso comercial com `subscription_inactive`                       |
+| `private.subscription_events_immutable()`                 | trigger                                        | bloqueia `UPDATE`/`DELETE` avulso; permite cascata quando a loja não existe               |
+| `public.owner_get_billing_profile(uuid)`                  | RPC `security definer stable`                  | lê o perfil de faturamento da loja para o owner                                           |
+| `public.owner_upsert_billing_profile(...)`                | RPC `security definer`                         | valida e grava o perfil mínimo; audita sem expor o documento                              |
+| `public.billing_bind_customer(...)`                       | RPC `security definer` (`service_role`)        | vincula o cliente externo, com bloqueio e conflito entre lojas                            |
+| `public.billing_begin_checkout(...)`                      | RPC `security definer` (`service_role`)        | inicia checkout idempotente por loja/requisição                                           |
+| `public.billing_complete_checkout(...)`                   | RPC `security definer` (`service_role`)        | grava assinatura externa e fatura pendente; **não** ativa                                 |
+| `public.billing_fail_checkout(...)`                       | RPC `security definer` (`service_role`)        | marca a requisição como `failed` com erro público                                         |
+| `public.billing_apply_payment_event(...)`                 | RPC `security definer` (`service_role`)        | valida e aplica pagamento autoritativo, com idempotência e proteção de estado             |
+| `public.billing_update_external_subscription_status(...)` | RPC `security definer` (`service_role`)        | atualiza apenas o marcador externo e a caixa de entrada                                   |
+| `public.billing_reconciliation_candidates(integer)`       | RPC `security definer stable` (`service_role`) | lista assinaturas para conciliação, da sincronização mais antiga para a mais recente      |
 
 As três funções de autorização ficam no schema **`private`**, não exposto pela Data API. A migração
 `20261029120000_move_security_helpers_to_private.sql` moveu as funções e atualizou políticas e
@@ -643,26 +747,29 @@ O disparo interno de triggers não depende desse privilégio.
 
 ## Permissões por coluna (resumo)
 
-| Tabela                  | `anon`   | `authenticated`                                                                       |
-| ----------------------- | -------- | ------------------------------------------------------------------------------------- |
-| `profiles`              | —        | `select (id, name)`, `update (name)`                                                  |
-| `stores`                | `select` | `select`, `update (name, description, phone, logo_url, active + colunas de checkout)` |
-| `store_memberships`     | —        | `select`, `insert (store_id, user_id, role)`, `update (role)`, `delete`               |
-| `platform_admins`       | —        | `select` (apenas a própria linha)                                                     |
-| `categories`            | `select` | `select`, `insert/update` de campos de conteúdo, `delete`                             |
-| `products`              | `select` | `select`, `insert/update`; sem `delete` (arquivamento)                                |
-| `option_groups`         | `select` | `select`, `insert/update`, `delete`                                                   |
-| `product_option_groups` | `select` | `select`, `insert`, `update (sort_order)`, `delete`                                   |
-| `product_options`       | `select` | `select`, `insert/update`, `delete`                                                   |
-| `customers`             | —        | `select` (owner/manager/employee do tenant)                                           |
-| `orders`                | —        | `select` (owner/manager/employee do tenant **ou** entregador com entrega do pedido)   |
-| `order_items`           | —        | idem ao pedido                                                                        |
-| `order_item_options`    | —        | idem ao pedido                                                                        |
-| `order_events`          | —        | `select` (owner/manager/employee do tenant)                                           |
-| `driver_profiles`       | —        | `select` (owner/manager/employee, admin ou o próprio usuário)                         |
-| `deliveries`            | —        | `select` (owner/manager/employee, admin ou entregador dono e ativo)                   |
-| `delivery_events`       | —        | `select` (owner/manager/employee, admin ou entregador dono e ativo)                   |
-| `delivery_locations`    | —        | — (schema `private`; sem acesso pela Data API)                                        |
+| Tabela                      | `anon`   | `authenticated`                                                                       |
+| --------------------------- | -------- | ------------------------------------------------------------------------------------- |
+| `profiles`                  | —        | `select (id, name)`, `update (name)`                                                  |
+| `stores`                    | `select` | `select`, `update (name, description, phone, logo_url, active + colunas de checkout)` |
+| `store_memberships`         | —        | `select`, `insert (store_id, user_id, role)`, `update (role)`, `delete`               |
+| `platform_admins`           | —        | `select` (apenas a própria linha)                                                     |
+| `categories`                | `select` | `select`, `insert/update` de campos de conteúdo, `delete`                             |
+| `products`                  | `select` | `select`, `insert/update`; sem `delete` (arquivamento)                                |
+| `option_groups`             | `select` | `select`, `insert/update`, `delete`                                                   |
+| `product_option_groups`     | `select` | `select`, `insert`, `update (sort_order)`, `delete`                                   |
+| `product_options`           | `select` | `select`, `insert/update`, `delete`                                                   |
+| `customers`                 | —        | `select` (owner/manager/employee do tenant)                                           |
+| `orders`                    | —        | `select` (owner/manager/employee do tenant **ou** entregador com entrega do pedido)   |
+| `order_items`               | —        | idem ao pedido                                                                        |
+| `order_item_options`        | —        | idem ao pedido                                                                        |
+| `order_events`              | —        | `select` (owner/manager/employee do tenant)                                           |
+| `driver_profiles`           | —        | `select` (owner/manager/employee, admin ou o próprio usuário)                         |
+| `deliveries`                | —        | `select` (owner/manager/employee, admin ou entregador dono e ativo)                   |
+| `delivery_events`           | —        | `select` (owner/manager/employee, admin ou entregador dono e ativo)                   |
+| `delivery_locations`        | —        | — (schema `private`; sem acesso pela Data API)                                        |
+| `billing_customers`         | —        | `select` (owner da loja ou admin); sem escrita direta                                 |
+| `billing_checkout_requests` | —        | `select` (owner da loja ou admin); sem escrita direta                                 |
+| `billing_webhook_events`    | —        | — (somente `service_role`)                                                            |
 
 Nas tabelas do cardápio, as políticas de escrita exigem `owner`/`manager` (ou
 `platform_admin`); `employee` e `driver` têm somente leitura. `store_id` não está nos grants de
@@ -740,12 +847,12 @@ npx supabase gen types typescript --project-id SEU_PROJECT_ID > src/types/databa
 
 ## Modelo futuro (não implementado nesta etapa)
 
-A base já acomoda as próximas tabelas, todas com `store_id` e RLS por vínculo:
+A base acomoda, para etapas futuras, feature gating por plano (limites de produtos, usuários e
+lojas), nota fiscal, repasse/split, retenção/anonimização de dados de faturamento e histórico de
+tentativas de cobrança por ciclo. Nada disso está implementado.
 
-- Integração de gateway: clientes/cobranças externas, conciliação de webhooks e estornos.
-- Feature gating por plano (limites de produtos, usuários e lojas).
-
-`plans`, `subscriptions`, `invoices` e `subscription_events` foram implementadas na Etapa 6A (ver
-[subscriptions.md](subscriptions.md)). As tabelas de cardápio foram implementadas na Etapa 2, as de
-pedidos na Etapa 3 e as de entregas na Etapa 4 (ver [orders.md](orders.md) e
+`plans`, `subscriptions`, `invoices` e `subscription_events` foram implementadas na Etapa 6A; clientes,
+checkout e webhooks de cobrança na Etapa 6B (ver [subscriptions.md](subscriptions.md) e
+[asaas-integration.md](asaas-integration.md)). As tabelas de cardápio foram implementadas na Etapa 2,
+as de pedidos na Etapa 3 e as de entregas na Etapa 4 (ver [orders.md](orders.md) e
 [deliveries.md](deliveries.md)).

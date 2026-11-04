@@ -208,18 +208,38 @@ pagamento. Ver [subscriptions.md](subscriptions.md).
 Critério de pronto: **atendido** — uma loja sem acesso comercial entra em modo restrito, mantém
 todos os dados e volta a vender após regularização administrativa.
 
-## Etapa 6B — Cobrança real (pendente)
+## Etapa 6B — Cobrança recorrente com Asaas Sandbox (implementada; homologação externa parcial em 2026-11-04)
 
-- Escolher e contratar gateway (recomendação inicial: Asaas; ver
-  [billing-providers.md](billing-providers.md)).
-- Modelar clientes, cobranças e referências externas.
-- Implementar webhooks assinados, idempotentes e com reconciliação.
-- Ativar pagamento no painel do proprietário, sem armazenar dados de cartão.
-- Tratar inadimplência, estorno, chargeback e conciliação.
-- Homologar o ciclo completo em sandbox e depois com valor real controlado.
+> **Implementada e testada internamente, sem homologação externa completa.** O ciclo real no Asaas
+> Sandbox (cobrança, confirmação simulada e webhook autenticado) não foi executado por ausência de
+> `ASAAS_API_KEY`/`ASAAS_WEBHOOK_TOKEN`. Ver [billing-sandbox.md](billing-sandbox.md).
 
-Critério de pronto: uma cobrança real confirmada pelo gateway ativa a assinatura e libera a loja;
-um não pagamento leva a carência e vencimento conforme a regra comercial.
+Entregue:
+
+- [x] Cliente Asaas server-side com timeout, retry/backoff, validação Zod, conversão segura de
+      centavos e erros sem segredos.
+- [x] Trava **Sandbox-only** que rejeita credencial, ambiente e endpoint de produção.
+- [x] Perfil de faturamento mínimo do owner, validado no servidor e isolado por loja.
+- [x] Cliente/assinatura/cobrança externa com referências únicas e migrações sem `reset`.
+- [x] Checkout idempotente que cria assinatura Pix mensal e primeira cobrança **sem liberar a loja**.
+- [x] Webhook `POST /api/webhooks/asaas` com `asaas-access-token` em tempo constante, limite de
+      payload, persistência durável, deduplicação e consulta autoritativa ao provedor.
+- [x] Aplicação transacional que valida loja, cliente, assinatura, valor exato do plano, moeda e
+      transições; libera somente após pagamento confirmado.
+- [x] Tratamento de atraso, carência de 5 dias, estorno, chargeback, reativação e evento atrasado.
+- [x] Conciliação manual reenviável (`npm run billing:reconcile`) sem inventar worker/agendador.
+- [x] Tela `/dashboard/assinatura` com perfil, valor, estado, histórico, link/Pix, aviso explícito de
+      Sandbox e sem botão “Pagar agora”.
+- [x] Testes unitários, integração real com pagamentos simulados e E2E; suítes anteriores verdes.
+- [x] Migrações aplicadas em `jtryfpaxocdiqrehptlz`, `db lint` limpo e advisors revisados.
+
+Fora do escopo: produção, cartão, nota fiscal, worker/fila, autoatendimento de troca de plano,
+notificações de cobrança e contratação/aceite de contrato. Ver
+[billing-production-limits.md](billing-production-limits.md) e [billing-costs.md](billing-costs.md).
+
+Critério de pronto: **parcialmente atendido** — o fluxo está implementado e comprovado com dados
+simulados; falta a cobrança real no Sandbox, a confirmação do provedor e o webhook externo de ponta a
+ponta.
 
 ## Etapa 7 — Endurecimento
 

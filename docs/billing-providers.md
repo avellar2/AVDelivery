@@ -1,12 +1,17 @@
-# Gateways de cobrança — pesquisa para a Etapa 6B
+# Gateways de cobrança — pesquisa e decisão
 
-Pesquisa realizada em **2026-11-04** apenas para fundamentar a decisão da próxima etapa. **Nenhum
-gateway foi contratado, nenhuma conta foi aberta e nenhuma cobrança real foi criada.** A Etapa 6A
-não processa pagamentos; este documento não é uma promessa de preço, pois taxas mudam sem aviso e
-podem depender do volume, do meio de pagamento e de negociação comercial.
+Pesquisa realizada em **2026-11-04** para fundamentar a Etapa 6B. **Nenhuma conta foi aberta, nenhum
+contrato foi aceito e nenhuma cobrança real foi criada.** A Etapa 6B foi implementada com o Asaas,
+exclusivamente em Sandbox; a homologação externa está pendente de credenciais. Este documento não é
+uma promessa de preço, pois taxas mudam sem aviso e podem depender do volume, do meio de pagamento e
+de negociação comercial.
 
 > Antes de contratar, confirme as taxas na página oficial e no contrato. Onde a página de preços não
 > pôde ser verificada, este documento diz explicitamente “não verificado” em vez de estimar.
+
+> **Implementação:** a integração Asaas Sandbox está descrita em
+> [asaas-integration.md](asaas-integration.md), o fluxo em [billing-payment-flow.md](billing-payment-flow.md)
+> e o status externo em [billing-sandbox.md](billing-sandbox.md).
 
 ## Critérios de avaliação
 
@@ -72,30 +77,42 @@ Trate os percentuais acima como promoção temporária, não como custo definiti
 | Pix de baixo valor               | R$ 1,99 (promo R$ 0,99)       | Não verificado       | 0,99% promocional       |
 | Adequação ao preço de R$ 59,90   | Boa, custo previsível por Pix | Depende da taxa real | Depende da taxa efetiva |
 
-## Recomendação para a Etapa 6B
+## Decisão da Etapa 6B
 
-**Primeira opção: Asaas.** É o único dos três com taxas oficiais verificáveis nesta pesquisa,
-assinatura recorrente nativa, webhooks com sandbox documentado e cobrança Pix de custo fixo — o que
-simplifica a conciliação de um plano único de R$ 59,90. O esforço de integração tende a ser menor
-porque o modelo de assinatura e o sandbox estão documentados.
+O Asaas foi escolhido e integrado **somente em Sandbox**: cliente/assinatura/cobrança Pix, webhook
+autenticado por token, conciliação reenviável e trava que rejeita endpoint/credencial de produção.
+A escolha comercial definitiva e a contratação continuam sendo decisão do responsável pelo produto.
 
 **Alternativas:** Mercado Pago é uma opção madura e com checkout conhecido pelo consumidor, mas só
-deve ser escolhido depois de confirmar as taxas e o fluxo de assinatura. Pagar.me é viável se a taxa
+deve ser escolhida depois de confirmar as taxas e o fluxo de assinatura. Pagar.me é viável se a taxa
 promocional se mantiver e se o sandbox for confirmado; caso contrário, não há vantagem clara sobre o
 Asaas para este produto.
 
-**Antes de implementar:** validar contrato e taxas vigentes, confirmar suporte a recorrência com
-Pix/boleto (não apenas cartão), definir tratamento de inadimplência e estorno, e homologar todo o
-fluxo em sandbox. A escolha final é uma decisão comercial do responsável pelo produto.
+**Antes de produção:** validar contrato e taxas vigentes, confirmar suporte a recorrência com
+Pix/boleto (não apenas cartão), revisar tratamento de inadimplência e estorno, concluir o roteiro de
+[homologação no Sandbox](billing-sandbox.md) e cumprir as
+[limitações de produção](billing-production-limits.md).
 
-## O que a Etapa 6A já prepara
+## O que a Etapa 6A preparou
 
 - Centavos inteiros e plano `avdelivery` a R$ 59,90.
 - `invoices` com status, vencimento, `paid_at` e referência externa única.
 - `subscription_events` imutável com `dedupe_key` para webhooks idempotentes.
-- Bloqueio de novas vendas centralizado no banco, que a cobrança real poderá liberar ao confirmar o
+- Bloqueio de novas vendas centralizado no banco, que a cobrança real pode liberar ao confirmar o
   pagamento.
-- Nenhum botão de pagamento ou coleta de cartão foi implementado.
+- Nenhum botão de pagamento ou coleta de cartão foi implementado na 6A.
+
+## O que a Etapa 6B adicionou
+
+- Cliente Asaas server-side com timeout, retry, validação e trava Sandbox-only.
+- Perfil de faturamento mínimo do owner e vínculo de cliente externo por RPC de serviço.
+- Checkout idempotente que cria assinatura Pix mensal e primeira cobrança sem liberar a loja.
+- Webhook durável e autenticado, com consulta autoritativa ao provedor e aplicação transacional.
+- Conciliação manual reenviável; sem worker ou agendador.
+- Tratamento de atraso, estorno, chargeback e reativação por pagamento confirmado.
+- Testes unitários, de integração real com dados simulados e E2E da interface.
+
+Nenhuma cobrança real, contrato, conta ou credencial de produção foi usada.
 
 ## Fontes consultadas
 

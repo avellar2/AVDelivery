@@ -1,13 +1,16 @@
 # Assinaturas e administração comercial
 
-Este documento descreve a fundação comercial implementada na **Etapa 6A**. Ela cobre planos,
-assinaturas, ciclo de teste/carência/vencimento, isenções, auditoria, onboarding de lojas pelo
-superadministrador e bloqueio de novas vendas. **Não há cobrança real nesta etapa**: nenhum gateway
-está integrado, nenhuma fatura é paga automaticamente e nenhum botão de pagamento é exibido.
+Este documento descreve a fundação comercial da **Etapa 6A** e a cobrança recorrente da **Etapa 6B**
+com o Asaas **Sandbox**. A Etapa 6A cobre planos, assinaturas, ciclo de teste/carência/vencimento,
+isenções, auditoria, onboarding e bloqueio de novas vendas. A Etapa 6B adiciona perfil de
+faturamento, cliente/assinatura/cobrança externa, webhook autenticado, conciliação manual e
+tratamento de atraso/estorno/chargeback.
 
-> Status honesto: a Etapa 6A entrega o controle comercial e a restrição de vendas. A Etapa 6
-> (cobrança real) permanece **incompleta** até a integração de gateway, webhooks e conciliação da
-> Etapa 6B.
+> Status honesto: a Etapa 6B está **implementada e testada internamente, com homologação externa
+> parcial**. Nenhuma cobrança real foi criada. O ciclo externo no Asaas Sandbox (cobrança real,
+> confirmação simulada pelo provedor e webhook autenticado de ponta a ponta) não pôde ser executado
+> por ausência de credenciais. Ver [billing-sandbox.md](billing-sandbox.md). Só um pagamento
+> confirmado e verificado libera a loja; criar assinatura **não** libera.
 
 ## Plano de referência
 
@@ -148,25 +151,67 @@ RLS está habilitada nas quatro tabelas. O proprietário lê a própria assinatu
 faturas, mas não escreve. `anon` só acessa o status comercial público pelo slug. As funções
 `SECURITY DEFINER` usam `search_path = ''` e verificam o chamador.
 
-## Compatibilidade com a Etapa 6B
+## Cobrança recorrente (Etapa 6B)
 
-A fundação foi desenhada para receber cobrança real sem reescrever o modelo:
+A integração usa somente o Asaas Sandbox. O fluxo completo está em
+[billing-payment-flow.md](billing-payment-flow.md); o resumo:
 
-- `invoices` já possui status, valor, vencimento, `paid_at` e referência externa única.
-- `subscription_events.dedupe_key` permite webhooks idempotentes.
-- `subscriptions` separa status comercial de datas de período e carência.
-- A regra de acesso é centralizada, então a cobrança real só precisa atualizar a assinatura/fatura;
-  o bloqueio e a liberação continuam consistentes em banco, vitrine e painel.
+1. O owner salva o perfil de faturamento em `/dashboard/assinatura` (`owner_upsert_billing_profile`).
+2. “Gerar cobrança Pix no Sandbox” cria/reutiliza cliente e assinatura `PIX`/`MONTHLY`, gera a
+   primeira cobrança e grava uma fatura **pendente**. A loja continua no estado anterior.
+3. O Asaas envia webhook autenticado por `asaas-access-token`; o servidor consulta o pagamento
+   autoritativo e aplica o estado por RPC transacional.
+4. Somente um pagamento `paid` estende o período, grava `paid_at`, ativa a assinatura e libera novas
+   vendas.
+5. Atraso mantém o bloqueio após a carência; estorno/chargeback do período vigente cancela o acesso;
+   novo pagamento confirmado reativa.
+6. “Verificar pagamento” e `npm run billing:reconcile` recuperam divergências sem duplicar períodos.
 
-Pendências para a Etapa 6B: escolher gateway, modelar clientes/cobranças externas, implementar
-webhooks assinados com reconciliação, ativar o botão de pagamento, tratar estorno/chargeback e testar
-o ciclo completo em sandbox. Ver [billing-providers.md](billing-providers.md).
+Novas tabelas: `billing_customers`, `billing_webhook_events` e `billing_checkout_requests`.
+`subscriptions` e `invoices` receberam referências externas, status externo, URL e Pix.
+
+Segurança: o owner lê o próprio perfil/checkout, mas não escreve; RPCs de escrita são exclusivas de
+`service_role`; o webhook não confia em `store_id` do payload; o valor é revalidado contra o plano;
+não há armazenamento de cartão/CVV/chave administrativa; nenhuma chave é exibida na interface.
+
+Limitações: sem worker/fila, sem nota fiscal, sem cartão, sem autoatendimento de troca de plano, sem
+job de cobrança e sem produção habilitada. Ver
+[billing-production-limits.md](billing-production-limits.md).
+
+Documentos relacionados: [asaas-integration.md](asaas-integration.md), [webhooks.md](webhooks.md),
+[billing-idempotency.md](billing-idempotency.md),
+[billing-reconciliation.md](billing-reconciliation.md),
+[billing-delinquency.md](billing-delinquency.md), [billing-sandbox.md](billing-sandbox.md) e
+[billing-costs.md](billing-costs.md).
+
+## Compatibilidade com etapas anteriores
+
+A fundação da 6A foi mantida sem reescrever o modelo:
+
+- `invoices` mantém status, valor, vencimento, `paid_at` e referência externa única.
+- `subscription_events.dedupe_key` garante idempotência dos eventos comerciais.
+- `subscriptions` separa status comercial, datas de período, carência e referência externa.
+- A regra de acesso continua centralizada; a cobrança só atualiza fatura/assinatura e o bloqueio
+  permanece consistente em banco, vitrine e painel.
+
+As migrações anteriores não foram alteradas. As correções da 6B foram feitas em migrações novas:
+`20261104120300_billing_preserve_paid_at.sql` (preserva `paid_at` em evento atrasado),
+`20261104120400_billing_lint_cleanup.sql` (remove variável não usada apontada pelo `db lint`) e
+`20261104120500_billing_checkout_amount_guard.sql` (exige que a primeira cobrança tenha exatamente o
+valor do plano).
 
 ## Testes
 
 - `tests/unit/subscriptions.test.ts` — fronteiras de teste/carência, estados, isenção, MRR,
   permissões e rótulos.
+- `tests/unit/billing-*.test.ts` — dinheiro/Sandbox-only, HTTP/retry, webhook, CPF/CNPJ e perfil.
 - `tests/integration/subscriptions.test.ts` — RPCs reais, RLS, concorrência de slug,
   idempotência, bloqueio/liberação de pedidos, imutabilidade e preservação de dados.
+- `tests/integration/billing.test.ts` — RLS/cross-tenant, escrita negada, checkout sem liberação,
+  valor adulterado, cliente divergente, confirmação, duplicidade, evento atrasado, concorrência,
+  estorno, chargeback, reativação e caixa de entrada de webhook. Os identificadores `cus_test_*`,
+  `sub_test_*` e `pay_test_*` são simulados; as RPCs e o banco são reais. **Não** é teste externo do
+  Asaas.
 - `tests/e2e/subscriptions.spec.ts` — fluxo completo pela interface: cadastro, trial, vencimento,
-  bloqueio, regularização e liberação.
+  bloqueio, regularização e liberação, além da tela Sandbox, formulário de faturamento e ausência de
+  “Pagar agora”.
