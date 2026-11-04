@@ -4,8 +4,8 @@ Plataforma SaaS multiempresa de delivery para hamburguerias, pizzarias, lanchone
 Comercialização por assinatura mensal por estabelecimento, sem comissão por pedido.
 
 **Status atual: Etapas 1, 2, 3 e 4 homologadas; Etapa 5 com homologação parcial; Etapas 5B e 5C
-com aplicativo Android validado apenas em emulador** em projeto Supabase exclusivo de testes
-(2026-10-29 a 2026-10-31).
+com aplicativo Android validado apenas em emulador; Etapa 6A implementada sem cobrança real** em
+projeto Supabase exclusivo de testes (2026-10-29 a 2026-11-04).
 
 A plataforma entrega autenticação, isolamento multiempresa por RLS, painel do estabelecimento,
 superadministrador, cardápio digital com categorias/produtos/adicionais e imagens, página pública
@@ -14,7 +14,9 @@ operação, acompanhamento por link com token, cadastro de entregadores, atribui
 mobile do entregador e rastreamento GPS em primeiro plano com mapa no acompanhamento do cliente.
 Há também um aplicativo Android do entregador com serviço de localização em primeiro plano nativo,
 exercitado em emulador (tela bloqueada de 30 minutos, Doze, perda de rede e processo encerrado),
-ainda sem homologação em aparelho físico. Cobrança por assinatura não faz parte.
+ainda sem homologação em aparelho físico. A Etapa 6A adiciona planos, assinaturas, onboarding
+administrativo, período de teste, carência e bloqueio de novas vendas sem acesso comercial, ainda
+**sem gateway nem cobrança real**.
 
 > Resultados reais, correções e pendências não bloqueantes: [docs/homologation.md](docs/homologation.md).
 
@@ -110,6 +112,16 @@ As migrações versionadas ficam em `supabase/migrations` e devem ser aplicadas 
 11. `20261030120100_deliveries_security.sql` — RLS, grants e leitura de pedidos pelo entregador.
 12. `20261030120200_deliveries_functions.sql` — RPCs de entregador/entrega e acompanhamento com
     estado da entrega.
+13. `20261031120000_delivery_locations_schema.sql` — posição GPS privada por entrega.
+14. `20261031120100_delivery_locations_functions.sql` — RPCs de compartilhamento e leitura do GPS.
+15. `20261104090000_subscriptions_schema.sql` — planos, assinaturas, faturas e eventos.
+16. `20261104090100_subscriptions_security.sql` — RLS e grants das tabelas comerciais.
+17. `20261104090200_subscriptions_functions.sql` — estado efetivo, acesso comercial, onboarding,
+    administração e bloqueio de novos pedidos.
+18. `20261104090300_subscriptions_backfill.sql` — isenção explícita das lojas preexistentes.
+19. `20261104090400_subscriptions_functions_fix.sql` — correção de lint na função administrativa.
+20. `20261104090500_subscription_events_cascade_fix.sql` — permite o `DELETE` em cascata dos eventos
+    quando a loja é removida, mantendo a imutabilidade nos demais casos.
 
 Com Supabase CLI:
 
@@ -210,7 +222,10 @@ npm run dev
 - `/dashboard/entregadores` — cadastro e ativação de entregadores (owner/manager)
 - `/entregador` — painel mobile do entregador (próprias entregas)
 - `/dashboard/configuracoes` — dados públicos e checkout da loja (owner/manager)
-- `/admin` — superadministrador
+- `/dashboard/assinatura` — assinatura e histórico da loja (owner)
+- `/admin` — superadministrador: métricas, busca, filtros e paginação
+- `/admin/lojas/nova` — cadastro transacional de estabelecimento
+- `/admin/lojas/[id]` — assinatura, vínculos, faturas e auditoria da loja
 - `/loja/[slug]` — cardápio público, carrinho e checkout
 - `/loja/[slug]/pedido/[numero]` — acompanhamento sem login (link com token)
 
@@ -297,10 +312,11 @@ npm test                 # unitários + integração (integração é ignorada s
 npm run test:e2e         # requer: npx playwright install chromium
 ```
 
-Situação atual: **207 testes Vitest aprovados** (21 arquivos), incluindo os 68 testes de integração
-da Fundação/cardápio, pedidos, entregas e rastreamento, executados com `SUPABASE_TEST_*`. A suíte E2E
-tem **16/16** aprovados, incluindo os fluxos completos de pedidos (entrega e retirada/Pix), de entrega
-em mobile e de rastreamento em 13 passos com GPS simulado. O detalhamento está em
+Situação atual: **237 testes Vitest aprovados** (23 arquivos), incluindo os testes de integração da
+Fundação/cardápio, pedidos, entregas, rastreamento e assinaturas, executados com `SUPABASE_TEST_*`.
+A suíte E2E tem **17/17** aprovados, incluindo os fluxos completos de pedidos (entrega e
+retirada/Pix), de entrega em mobile, de rastreamento em 13 passos com GPS simulado e do ciclo
+comercial (cadastro → teste → bloqueio → regularização). O detalhamento está em
 [docs/homologation.md](docs/homologation.md).
 
 O Vitest e o Playwright carregam `.env.local` automaticamente. O E2E autenticado da Fundação
@@ -373,6 +389,12 @@ atribuição, login mobile do entregador, início, acompanhamento do cliente, vi
 confirmação, histórico, consistência no banco, isolamento de outra loja e ausência de dados do
 entregador no link público.
 
+`tests/integration/subscriptions.test.ts` cobre o comercial (ignorado sem `SUPABASE_TEST_*`):
+criação transacional com assinatura e owner, RLS e negação de escrita, concorrência e idempotência
+de slug, bloqueio de novos pedidos no vencimento sem perder pedidos antigos, auditoria imutável,
+isenção, preservação do último owner e listagem administrativa. O E2E
+`tests/e2e/subscriptions.spec.ts` percorre o ciclo completo pela interface.
+
 ## Scripts
 
 | Comando                        | Descrição                       |
@@ -395,7 +417,7 @@ entregador no link público.
 src/
   app/                  rotas (auth, dashboard, entregador, admin, loja pública e acompanhamento, API de imagem)
   components/           UI, layout, cardápio/carrinho, acompanhamento (mapa), fila de pedidos e entregas
-  modules/              domínio: auth, stores, memberships, menu, orders, deliveries, tracking, dashboard, platform-admin
+  modules/              domínio: auth, stores, memberships, menu, orders, deliveries, tracking, dashboard, platform-admin, subscriptions
   lib/                  Supabase, validação de env, erros, redirects, utilitários
   types/database.ts     tipos do schema (mantidos manualmente nesta etapa)
 supabase/migrations/    SQL versionado
@@ -444,13 +466,22 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - [Rastreamento GPS](docs/gps.md)
 - [Aplicativo Android do entregador](docs/gps-android.md)
 - [Custos do GPS](docs/gps-costs.md)
+- [Assinaturas e administração comercial](docs/subscriptions.md)
+- [Gateways de cobrança](docs/billing-providers.md)
 - [Homologação](docs/homologation.md)
 - [Roadmap](docs/roadmap.md)
 
 ## Limitações conhecidas
 
-- Não há tela de criação de lojas/usuários; isso é feito por scripts com service role.
+- Não há convite de equipe por token; o vínculo é feito pelo superadministrador com usuário já
+  existente.
 - Não há gestão de funcionários na interface (apenas o modelo e as políticas).
+- Assinatura sem cobrança real: não há gateway, emissão automática de fatura, pagamento online,
+  estorno, conciliação ou nota fiscal. O botão de pagamento não é exibido.
+- O bloqueio comercial impede **novos pedidos**, mas não apaga nem oculta pedidos, cardápio ou dados
+  históricos; o painel e o cardápio continuam acessíveis.
+- A isenção de lojas preexistentes é explícita e auditada; não há isenção automática para lojas
+  futuras.
 - Logo da loja é armazenado, mas a página pública usa monograma; imagens de produto são exibidas.
 - Produtos são arquivados/desativados (`available=false`); não há exclusão física de produto.
 - Categorias só podem ser excluídas sem produtos; grupos só sem opções ou associações.
@@ -473,8 +504,8 @@ Detalhes completos em [docs/security.md](docs/security.md).
   push/Realtime.
 - Rate limit em memória é por instância; os limites por telefone no banco são compartilhados.
 - Lista de pedidos limitada a 200 por consulta, sem paginação.
-- Sem paginação na lista administrativa de lojas (limite de 200).
-- Sem MFA, auditoria de ações, CSP completa ou limitador distribuído.
+- Sem MFA, CSP completa ou limitador distribuído. A auditoria cobre eventos comerciais
+  (`subscription_events`), não todas as ações administrativas.
 - O cookie de loja ativa usa `secure` quando `NODE_ENV=production`.
 - Leaked password protection (HIBP) desabilitada: habilitar no dashboard do Supabase.
 - Entrega real de e-mail de recuperação não verificada (fluxo validado via token); configurar
@@ -491,7 +522,9 @@ Detalhes completos em [docs/security.md](docs/security.md).
 
 ## Próxima etapa recomendada
 
-As Etapas 1 a 4 estão homologadas e a Etapa 5 tem homologação web parcial. A Etapa 6 — Assinatura e
-cobrança, conforme [docs/roadmap.md](docs/roadmap.md), permanece como próximo escopo e não foi
-iniciada. Antes de retomar rastreamento, recomenda-se validar o app Android em aparelho físico e
-decidir sobre iOS.
+As Etapas 1 a 4 estão homologadas, a Etapa 5 tem homologação web parcial e a Etapa 6A está
+implementada sem cobrança real. A Etapa 6B — cobrança real — é o próximo escopo e **não foi
+iniciada**: exige escolher/contratar gateway, implementar webhooks e homologar pagamento em sandbox.
+A recomendação inicial de gateway está em [docs/billing-providers.md](docs/billing-providers.md).
+Antes de retomar rastreamento, recomenda-se validar o app Android em aparelho físico e decidir sobre
+iOS.

@@ -236,6 +236,33 @@ grant de escrita para `anon` ou `authenticated`: a única porta de escrita são 
 - Coordenadas não são logadas, não entram em URL e não há histórico de rota. Retenção: somente
   durante a entrega ativa.
 
+### Assinaturas e administração comercial (Etapa 6A)
+
+- RLS habilitada em `plans`, `subscriptions`, `invoices` e `subscription_events`.
+- `anon` lê apenas o status comercial público por slug, via `get_store_commercial_status`, sem
+  expor ids, valores de fatura, motivo de isenção ou histórico.
+- `authenticated` lê apenas a própria assinatura, faturas e eventos (owner) ou dados
+  administrativos (superadministrador), por RLS e RPCs; não há `INSERT`, `UPDATE` ou `DELETE`
+  direto para owner, manager, employee ou driver.
+- `plans` é legível por autenticados para exibição; escrita é exclusiva de `service_role`.
+- RPCs administrativas (`admin_create_store`, `admin_add_store_owner`, `admin_update_store`,
+  `admin_update_subscription`, `admin_list_store_billing`) verificam `platform_admins` via
+  `auth.uid()`, usam `SECURITY DEFINER` com `search_path = ''` e revogam execução de `anon`.
+- O onboarding usa advisory lock por slug + restrição única, evitando duas lojas com o mesmo
+  identificador em requisições concorrentes.
+- `request_id`/`dedupe_key` tornam criação e ações administrativas idempotentes; repetir não duplica
+  eventos.
+- `subscription_events` é imutável: atualização e exclusão avulsa falham com
+  `insufficient_privilege`. A cascata de exclusão da loja é a única exceção, condicionada à
+  inexistência da loja.
+- Faturas exigem `paid_at` quando `paid` e referência externa única por provedor; não é possível
+  fabricar uma fatura paga sem data de pagamento.
+- O bloqueio de novas vendas é aplicado por trigger `BEFORE INSERT` em `orders`, não apenas pela UI;
+  chamadas diretas à RPC também são recusadas. Pedidos já aceitos não são tocados.
+- Isenções exigem motivo e geram evento. Lojas preexistentes foram isentas explicitamente
+  (`grandfathered`); não há isenção automática para lojas futuras.
+- `service_role` não é usada no navegador. Não há coleta nem armazenamento de dados de cartão.
+
 ### Rate limit e abuso
 
 - Checkout: 10 tentativas/min por IP + loja, em memória por instância.
@@ -304,6 +331,8 @@ função `security definer`, em vez de fazer subconsulta na própria tabela.
 - Não há funções de autorização expostas via `/rest/v1/rpc`: elas ficam em `private`.
 - Funções de trigger têm `EXECUTE` revogado das roles da API e não podem ser chamadas como RPC.
 - `platform_admins` permite `SELECT` apenas da própria linha.
+- `plans` é legível por autenticados; `subscriptions`, `invoices` e `subscription_events` são
+  legíveis apenas pelo owner da loja ou superadministrador, conforme a política.
 - `service_role` ignora RLS, não é exposta ao cliente e é usada apenas em scripts.
 
 ## Permissões por coluna
@@ -453,22 +482,24 @@ endereços nunca são logados.
    acompanhamento usam limitador em memória por instância + limites por telefone no banco. Não há
    limitador distribuído nem CAPTCHA.
 3. **Sem MFA** para superadministradores.
-4. **Sem trilha de auditoria** de alterações de papel/loja.
-5. **Criação de lojas/usuários apenas por script** — não há UI administrativa nesta etapa.
+4. **Auditoria comercial, não administrativa ampla** — `subscription_events` cobre o ciclo
+   comercial; alterações de papel e outras ações administrativas ainda não têm trilha.
+5. **Onboarding pela UI, mas sem convite por token** — o superadministrador cria a loja e vincula um
+   usuário existente; não há cadastro público de estabelecimento nem convite por e-mail.
 6. **Superadministrador pode ler todos os perfis** (política `profiles_select_own_or_admin`),
    intencional para suporte; pode ser restringido no futuro.
 7. **Proprietário pode inserir qualquer usuário existente por UUID** como membro (via API); a UI de
    convites ainda não existe.
 8. **Logo da loja não é renderizado** — a página pública usa monograma; imagens de produto são
    renderizadas a partir do bucket público.
-9. **Sem paginação no admin** — consulta limitada a 200 lojas.
+9. **Busca e paginação no admin** — a lista é paginada em 10 itens e filtra por texto/estado; não
+   há exportação nem busca por documento.
 10. **Segurança do projeto Supabase** (acesso ao dashboard, chaves, backups) é parte da fronteira de
     confiança e deve ser protegida com MFA e rotação de chaves.
-11. **Homologação concluída em 2026-10-29 (Etapas 1 e 2) e 2026-10-30 (Etapas 3 e 4)** — 59
-    integrações com Auth/PostgREST/Storage, 179 testes Vitest e 14 E2E, incluindo login/logout,
-    recuperação, cardápio/uploads, o fluxo completo de pedidos e o fluxo de entrega. Pendências não
-    bloqueantes: HIBP, entrega real de e-mail e rotação após expiração de 1h. Ver
-    [homologation.md](homologation.md).
+11. **Homologação em 2026-10-29 a 2026-11-04** — integrações com Auth/PostgREST/Storage, 237 testes
+    Vitest e 17 E2E, incluindo login/logout, recuperação, cardápio/uploads, pedidos, entregas,
+    rastreamento e o ciclo comercial. Pendências não bloqueantes: HIBP, entrega real de e-mail e
+    rotação após expiração de 1h. Ver [homologation.md](homologation.md).
 12. **Bucket público** — imagens continuam acessíveis por URL mesmo após desativação; não usar para
     conteúdo privado.
 13. **Capacidade de grupos** — a consistência mínimo/máximo × opções é garantida nas ações do app e
@@ -499,6 +530,12 @@ endereços nunca são logados.
     conferidos no banco. Rastreamento com tela bloqueada permanece pendente.
 23. **Localização é dado pessoal** — o envio é opt-in, limitado à entrega ativa e sem histórico. A
     posição é apagada ao concluir, cancelar, reatribuir ou parar o compartilhamento.
+24. **Sem cobrança real na Etapa 6A** — não há gateway, webhook, conciliação, estorno ou nota fiscal;
+    faturas são administrativas. Nenhum dado de cartão é coletado ou armazenado. A ativação depende
+    de ação do superadministrador até a Etapa 6B.
+25. **Isenção e trial são regras comerciais** — um superadministrador pode ativar ou isentar
+    manualmente, sempre com evento auditável. O trial não é renovável automaticamente e não há
+    prevenção de abuso por múltiplas lojas na mesma organização nesta etapa.
 
 ## Checklist operacional
 

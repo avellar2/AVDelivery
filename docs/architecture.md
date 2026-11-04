@@ -51,6 +51,7 @@ src/
     dashboard/
       layout.tsx               shell autenticado + contexto da loja ativa
       page.tsx                 visão geral / seleção de loja / estado sem loja
+      assinatura/              estado comercial e histórico (owner)
       configuracoes/           edição dos dados públicos e do checkout da loja
       produtos/                painel do cardápio (produtos/categorias/adicionais)
       pedidos/                 fila e operação de pedidos
@@ -58,7 +59,9 @@ src/
     entregador/                painel mobile do entregador (próprias entregas)
     admin/
       layout.tsx               proteção de superadministrador
-      page.tsx                 lista global de estabelecimentos
+      page.tsx                 lista global, métricas, busca, filtro e paginação
+      lojas/nova/              cadastro transacional de estabelecimento
+      lojas/[id]/              assinatura, vínculos, faturas e auditoria
     loja/[slug]/page.tsx       cardápio público + carrinho/checkout
     loja/[slug]/pedido/[numero]/page.tsx  acompanhamento por token (sem login)
     error.tsx / not-found.tsx
@@ -78,6 +81,7 @@ src/
     deliveries/                entregadores, entregas, RPCs, regras e ações
     dashboard/                 definição da navegação
     platform-admin/            guard e consultas globais
+    subscriptions/             estado efetivo, métricas, validações, consultas e ações comerciais
   lib/
     supabase/                  config, clients SSR/anônimo, proxy e route helper
     errors.ts                  AppError e mensagens públicas
@@ -270,6 +274,27 @@ Detalhes de fluxo, máquina de estados, idempotência e limitações: [orders.md
 Detalhes: [gps-android.md](gps-android.md). GUI web: [gps.md](gps.md). Custos:
 [gps-costs.md](gps-costs.md).
 
+## Assinaturas e acesso comercial (Etapa 6A)
+
+- `src/modules/subscriptions` concentra tipos, cálculo de estado efetivo em TypeScript, métricas,
+  validações Zod, consultas e Server Actions. A regra de negócio autoritativa continua no banco.
+- `private.effective_subscription_state` e `private.store_has_commercial_access` calculam o acesso a
+  partir de status, datas e isenção. O TypeScript espelha a mesma lógica apenas para exibir estado e
+  rótulos; a decisão de bloquear pedido é do trigger `BEFORE INSERT` em `orders`.
+- A vitrine recebe `hasCommercialAccess` de `get_store_commercial_status(slug)` (RPC pública por
+  slug). O servidor passa o valor para o componente de storefront e para o carrinho; o checkout
+  desabilita quando não há acesso, mas a garantia final é o banco.
+- O bloqueio é de **novas vendas**: pedidos existentes, cardápio, painel e histórico permanecem.
+- O onboarding usa `admin_create_store`, que cria loja, assinatura, vínculo de owner e eventos em
+  uma transação; o slug é protegido por advisory lock e restrição única.
+- As ações do superadministrador (`admin_update_subscription`, `admin_add_store_owner`,
+  `admin_update_store`) são RPCs `SECURITY DEFINER` com `search_path = ''`, verificação de
+  `platform_admins` e auditoria em `subscription_events`.
+- Não há integração de pagamento: a interface mostra o estado comercial, não um checkout de
+  assinatura.
+
+Detalhes: [subscriptions.md](subscriptions.md).
+
 ## Decisões técnicas
 
 ### Next.js 16 sem Cache Components
@@ -352,3 +377,8 @@ Vitest (68 de integração) e 16 E2E, incluindo o fluxo de rastreamento em 13 pa
 revogação, limpeza e isolamento entre lojas. O GPS web em primeiro plano está homologado; o envio com
 tela bloqueada/app em segundo plano permanece pendente por falta de dispositivo físico. Ver
 [gps.md](gps.md) e [homologation.md](homologation.md).
+
+**Etapa 6A implementada e validada em 2026-11-04**: 20 migrações aplicadas sem `reset`, 237 testes
+Vitest (23 arquivos) e 17 E2E, incluindo o ciclo comercial completo. Há plano, assinatura, trial,
+carência, isenção, onboarding, auditoria e bloqueio de novas vendas; **não há gateway nem cobrança
+real**. Ver [subscriptions.md](subscriptions.md) e [billing-providers.md](billing-providers.md).

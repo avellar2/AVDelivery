@@ -176,21 +176,50 @@ distância, ETA, aplicativo nativo e mapa no painel da loja.
 Critério de pronto: **parcialmente atendido** — o GPS web em primeiro plano foi validado de ponta a
 ponta; o segundo plano depende de app nativo/híbrido e de teste em dispositivo físico.
 
-## Etapa 6 — Assinatura e cobrança
+## Etapa 6A — Administração comercial, onboarding e fundação de assinaturas (implementada em 2026-11-04)
 
-Objetivo: monetizar por estabelecimento.
+> **Implementada e validada em projeto de homologação**, sem cobrança real. A Etapa 6 continua
+> **incompleta** até a Etapa 6B integrar um gateway e validar pagamento de verdade.
 
-Escopo:
+Objetivo: controlar o acesso comercial de cada estabelecimento e permitir o onboarding sem depender
+de scripts.
 
-- Tabelas `plans`, `subscriptions`, `invoices`, `subscription_events`.
-- Integração com gateway (a definir) usando webhooks assinados.
-- Trial, carência, suspensão lógica e reativação de loja.
-- Feature gating por plano (ex.: número de produtos, usuários e lojas).
-- Painel do superadministrador com inadimplência e status.
-- Idempotência de webhooks e reconciliação.
-- Testes de webhook, assinatura e bloqueio/liberação.
+Entregue:
 
-Critério de pronto: uma loja sem assinatura ativa entra em modo restrito sem perder dados.
+- [x] Migrações de `plans`, `subscriptions`, `invoices` e `subscription_events` com RLS e auditoria
+      imutável.
+- [x] Plano `avdelivery` a R$ 59,90/mês em centavos, com trial de 7 dias e carência de 5 dias
+      configuráveis.
+- [x] Estados efetivos `trialing`, `active`, `grace`, `expired`, `canceled`, `exempt`, `missing` e
+      `inactive`, com datas de fim inclusivas.
+- [x] Isenção explícita e auditada; lojas preexistentes migradas como `grandfathered`, sem isenção
+      automática para lojas futuras.
+- [x] Onboarding transacional em `/admin/lojas/nova`, com proteção contra corrida de slug.
+- [x] Vínculo de proprietário por e-mail, preservando o último owner e sem cadastro público.
+- [x] Painel `/admin` com métricas, MRR, busca, filtro e paginação; detalhe em `/admin/lojas/[id]`.
+- [x] Painel do proprietário em `/dashboard/assinatura`, sem botão de pagamento.
+- [x] Função central de acesso comercial e trigger que bloqueia **novos** pedidos sem apagar dados.
+- [x] 20 testes unitários, 10 de integração e 1 E2E do fluxo completo; suítes anteriores mantidas.
+- [x] Migrações aplicadas no projeto `jtryfpaxocdiqrehptlz`, `db lint` e advisors revisados.
+
+Fora do escopo desta etapa: cobrança real, gateway, webhooks, nota fiscal, estorno e botão de
+pagamento. Ver [subscriptions.md](subscriptions.md).
+
+Critério de pronto: **atendido** — uma loja sem acesso comercial entra em modo restrito, mantém
+todos os dados e volta a vender após regularização administrativa.
+
+## Etapa 6B — Cobrança real (pendente)
+
+- Escolher e contratar gateway (recomendação inicial: Asaas; ver
+  [billing-providers.md](billing-providers.md)).
+- Modelar clientes, cobranças e referências externas.
+- Implementar webhooks assinados, idempotentes e com reconciliação.
+- Ativar pagamento no painel do proprietário, sem armazenar dados de cartão.
+- Tratar inadimplência, estorno, chargeback e conciliação.
+- Homologar o ciclo completo em sandbox e depois com valor real controlado.
+
+Critério de pronto: uma cobrança real confirmada pelo gateway ativa a assinatura e libera a loja;
+um não pagamento leva a carência e vencimento conforme a regra comercial.
 
 ## Etapa 7 — Endurecimento
 
@@ -205,10 +234,10 @@ Critério de pronto: uma loja sem assinatura ativa entra em modo restrito sem pe
 
 ## Backlog técnico prioritário
 
-1. **UI administrativa** para criar lojas, usuários e vínculos (hoje só por script).
-2. **Convites de equipe** com token de uso único, em vez de inserir usuário por UUID.
+1. ~~**UI administrativa** para criar lojas, usuários e vínculos~~ — concluído na Etapa 6A.
+2. **Convites de equipe** com token de uso único, em vez de vincular usuário existente por e-mail.
 3. **Geração automática de tipos** do Supabase no CI.
-4. **Paginação e busca** na lista administrativa.
+4. ~~**Paginação e busca** na lista administrativa~~ — concluído na Etapa 6A.
 5. **Renderização do logo** com validação de domínio de imagem.
 6. **Política de troca de slug** (alias/redirect) para não quebrar links públicos.
 7. **Testes E2E autenticados** com projeto Supabase de teste e storage state do Playwright.

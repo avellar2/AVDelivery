@@ -3,8 +3,9 @@
 ## Status
 
 **Etapas 1 e 2 homologadas em 2026-10-29; Etapas 3 e 4 homologadas em 2026-10-30; Etapa 5 com
-homologação parcial em 2026-10-31**, com um item de endurecimento não bloqueante pendente (proteção
-de senhas vazadas, configuração manual no painel).
+homologação parcial em 2026-10-31; Etapa 6A implementada e validada em 2026-11-04, sem cobrança
+real**, com um item de endurecimento não bloqueante pendente (proteção de senhas vazadas,
+configuração manual no painel).
 
 As Etapas 3, 4 e 5 foram validadas contra o projeto Supabase real de homologação, com migrações
 aplicadas, integração, E2E e revisão visual em desktop e mobile. Na Etapa 5, o GPS web em primeiro
@@ -160,7 +161,9 @@ habilitado no dashboard (Authentication > Password Security). Não bloqueia a ho
 
 ## Dados de homologação preservados no projeto de testes
 
-- 2 lojas ativas: `burger-homologacao`, `pizza-homologacao`;
+- 4 lojas no projeto: `burger-homologacao`, `pizza-homologacao`, `stage5c-a` e `stage5c-b` —
+  as duas primeiras demo e as duas últimas fixtures da validação Android. As lojas preexistentes à
+  Etapa 6A receberam assinatura `active` isenta, registrada como `grandfathered`.
 - 4 vínculos `owner` (2 originais + 2 contas dedicadas de teste);
 - 2 superadministradores;
 - 6 perfis.
@@ -819,3 +822,113 @@ Critérios completos para declarar homologação física em
 - [x] Suítes, typecheck, lint, Prettier, build Next.js e build Android aprovados.
 - [ ] Homologação em aparelho físico Android com GNSS real e tela bloqueada prolongada.
 - [ ] Execução em Android 14 ou superior em aparelho real.
+
+## Etapa 6A — Administração comercial e assinaturas
+
+**Status: implementada e validada em 2026-11-04 no projeto de homologação, sem cobrança real.**
+
+Nenhum gateway foi contratado, nenhuma cobrança foi emitida e nenhum botão de pagamento foi
+publicado. A Etapa 6 (cobrança) permanece incompleta até a Etapa 6B. Nenhum `reset` remoto foi
+executado, nenhuma migração já aplicada foi editada e nenhum dado de produção foi acessado.
+
+### Migrações aplicadas
+
+Aplicadas via `supabase db push --linked`, em ordem, sem `reset`:
+
+1. `20261104090000_subscriptions_schema.sql` — enums, `plans`, `subscriptions`, `invoices` e
+   `subscription_events`; seed do plano `avdelivery` (R$ 59,90, trial 7, carência 5).
+2. `20261104090100_subscriptions_security.sql` — RLS, grants e políticas de leitura.
+3. `20261104090200_subscriptions_functions.sql` — estado efetivo, acesso comercial, onboarding,
+   administração, vínculo de owner e trigger de bloqueio de novos pedidos.
+4. `20261104090300_subscriptions_backfill.sql` — isenção explícita das lojas preexistentes e evento
+   `grandfathered`.
+5. `20261104090400_subscriptions_functions_fix.sql` — correção de lint (variável não usada).
+6. `20261104090500_subscription_events_cascade_fix.sql` — permite `DELETE` em cascata dos eventos
+   quando a loja é removida, sem abrir atualização ou exclusão avulsa.
+
+### Resultados reais
+
+- Migrações aplicadas e confirmadas no histórico remoto.
+- **237 testes Vitest aprovados em 23 arquivos**, incluindo 20 unitários e 10 de integração novos
+  de assinaturas executados contra o Supabase real.
+- **17/17 testes Playwright aprovados**, incluindo o novo fluxo comercial completo.
+- `npm run typecheck`, `npm run lint`, Prettier e `npm run build` aprovados.
+- `supabase db lint --linked` sem erros; advisors revisados.
+- Suítes anteriores (Fundação, cardápio, pedidos, entregas, rastreamento, Android) mantidas verdes.
+
+### Fluxo completo validado (E2E)
+
+1. Superadministrador cria o estabelecimento em `/admin/lojas/nova`.
+2. Assinatura `trialing`, vínculo `owner` e evento `store_created` são persistidos de verdade.
+3. Proprietário entra no painel e vê `/dashboard/assinatura` com plano, teste e **sem** “Pagar
+   agora”.
+4. A loja aceita pedidos durante o teste.
+5. O fim do teste/carência é simulado atualizando as datas da assinatura — sem alterar o relógio do
+   banco e sem `sleep` longo.
+6. Vitrine, painel e tela de assinatura passam a indicar bloqueio; o checkout é desabilitado.
+7. Superadministrador regulariza com motivo; evento administrativo é gravado.
+8. A loja volta a aceitar pedidos e o alerta desaparece.
+
+Fixtures criadas pelo teste são removidas no `finally`, inclusive usuário e loja.
+
+### Segurança e concorrência verificadas
+
+- RLS habilitada nas quatro tabelas; `anon` só lê o status comercial público pelo slug.
+- Owner lê a própria assinatura/faturas, mas não escreve; escrita direta retorna `42501`.
+- RPCs administrativas exigem `platform_admins`; usuário comum recebe `forbidden`.
+- Criação concorrente com o mesmo slug: uma requisição vence, a outra falha de forma controlada.
+- Repetição da mesma criação/ação com `request_id` não duplica registros nem eventos.
+- Eventos de assinatura são imutáveis; atualização e exclusão avulsa são bloqueadas.
+- Fatura `paid` sem `paid_at` e referência externa duplicada são rejeitadas.
+- O último owner da loja não pode ser removido.
+- Pedidos são bloqueados no `INSERT`, preservando pedidos já aceitos e o comportamento idempotente.
+- `service_role` não é usada no navegador; segredos permanecem em `.env.local`.
+
+### Revisão visual
+
+Capturas em desktop e mobile confirmaram: lista administrativa com métricas e paginação, formulário
+de cadastro, detalhe da loja com ações/histórico, painel de assinatura do owner, vitrine em teste e
+em vencimento, avisos de bloqueio e estado vazio de faturas. Nenhum botão de pagamento aparece.
+
+### Correções durante a implementação
+
+- Conflito entre imutabilidade dos eventos e `ON DELETE CASCADE` ao remover loja: resolvido com a
+  migração `20261104090500`, que permite exclusão apenas quando a loja já não existe.
+- Tipagem do detalhe administrativo: removida referência a campo de isenção não retornado pela RPC;
+  o motivo permanece visível no histórico de eventos.
+- Teste de integração de admin não autorizado chamava a RPC de criação; corrigido para chamar
+  diretamente a RPC proibida.
+- Fixture de vencimento precisava atualizar início e fim do teste para respeitar o `CHECK`.
+- Seletores E2E ambíguos (“Ação”/“Motivo”) e paginação após execuções repetidas foram ajustados; a
+  busca por nome no teste de homologação elimina dependência da ordem.
+- Restos de fixtures de execuções anteriores foram removidos após confirmar que eram literais de
+  teste, sem tocar as quatro lojas preservadas.
+
+### Pendências e limitações da Etapa 6A
+
+- **Sem cobrança real**: gateway, webhooks, conciliação, estorno, chargeback e nota fiscal.
+- Sem botão de pagamento e sem coleta de dados de cartão.
+- Sem emissão automática de faturas; faturas são administrativas e o estado vazio é honesto.
+- Sem job/cron noturno: o estado é derivado das datas, então a transição é calculada no acesso.
+- Sem convite de equipe por token; o owner precisa existir no Auth.
+- Feature gating por plano (limites de produtos/usuários) não foi implementado nesta etapa.
+- A recomendação de gateway em [billing-providers.md](billing-providers.md) precisa de validação
+  comercial e contratação; taxas não verificadas estão marcadas como tal.
+
+### Critérios de aceite da Etapa 6A
+
+- [x] Superadministrador cria e gerencia estabelecimentos pela interface, sem script.
+- [x] Plano de referência em centavos, trial e carência configuráveis.
+- [x] Estados comerciais e isenção explícita e auditada.
+- [x] Lojas preexistentes preservadas sem isenção silenciosa para lojas futuras.
+- [x] Assinatura, faturas e eventos com RLS e imutabilidade.
+- [x] Painel administrativo com métricas, busca, filtros e paginação.
+- [x] Painel do proprietário sem botão de pagamento.
+- [x] Bloqueio de **novos** pedidos no banco, com dados e pedidos antigos preservados.
+- [x] Testes unitários, de integração real e E2E completos, sem regressão nas suítes anteriores.
+- [x] Nenhum gateway contratado, nenhuma cobrança real e nenhuma credencial exposta.
+- [ ] Cobrança real e conciliação — explicitamente fora da 6A, pendente para a 6B.
+
+Reprodução: os mesmos comandos da seção anterior (`db push`, `npm test`, `npm run test:e2e`,
+`typecheck`, `lint`, `build`, `db lint`). O E2E comercial usa `SUPERADMIN_*` e `SUPABASE_TEST_*` e
+cria/remove suas próprias fixtures.
