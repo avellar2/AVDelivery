@@ -617,11 +617,16 @@ endereços nunca são logados.
 28. **Dados de faturamento são pessoais** — CPF/CNPJ, e-mail, telefone e endereço são necessários ao
     provedor. Não há política automática de retenção/anonimização; a remoção da loja cascateia os
     dados locais, mas obrigações futuras podem exigir retenção separada.
-29. **Homologação da Etapa 7A é parcial, não uma promessa de agendamento** — worker, conciliação,
-    leases, recuperação, retry e dead letter foram exercitados contra o Supabase de homologação, mas
-    o cron não foi ativado em um ambiente publicado com URL estável. A homologação externa do Asaas
-    (cobrança Sandbox, confirmação simulada e webhook autenticado) foi concluída na Etapa 6B. Ver
-    [billing-sandbox.md](billing-sandbox.md) e [homologation.md](homologation.md).
+29. **Homologação da Etapa 7A é operacional, mas ainda parcial** — worker, conciliação, leases,
+    recuperação, retry e dead letter foram exercitados contra o Supabase de homologação e, na Etapa
+    7A.1, também em ambiente publicado por túnel HTTPS com agendador real. A publicação foi
+    temporária (URL efêmera) e não há alerta externo. A homologação externa do Asaas (cobrança
+    Sandbox, confirmação simulada e webhook autenticado) foi concluída na Etapa 6B e repetida na
+    7A.1. Ver [billing-sandbox.md](billing-sandbox.md) e [homologation.md](homologation.md).
+30. **Exposição por túnel** — durante a 7A.1 a aplicação ficou acessível por uma URL pública
+    temporária. As rotas internas continuaram fechadas (401 sem segredo ou com segredo fora da faixa)
+    e o webhook exigiu `asaas-access-token`; nenhum dado de produção estava no processo. Um túnel não
+    substitui hospedagem com domínio próprio, TLS gerenciado e monitoramento.
 
 ## Checklist operacional
 
@@ -647,7 +652,10 @@ endereços nunca são logados.
 - [x] Etapa 7A: webhook só persiste e responde `200`; rotas internas protegidas por segredo de 32–255
       com comparação em tempo constante; leases, retry, dead letter e conciliação exercitados contra o
       banco real; diagnóstico restrito a superadministrador e sem PII.
-- [ ] Ativar cron em ambiente publicado e alerta externo de falha/dead letter/divergência.
+- [x] Etapa 7A.1: rotas internas continuaram em `401` quando publicadas por HTTPS sem segredo ou com
+      segredo fora da faixa; webhook rejeitou token inválido; entrega externa real processada fora do
+      ciclo HTTP; duplicidade e evento fora de ordem sem efeito financeiro repetido.
+- [ ] Hospedagem HTTPS estável com cron permanente e alerta externo de falha/dead letter/divergência.
 - [ ] Revogação de permissão em tempo de execução e ciclo de reatribuição/conclusão no app.
 - [ ] Validar GPS físico e comportamento com tela bloqueada em Android e iOS.
 - [x] `service_role` usada apenas em scripts e em `src/lib/supabase/admin.ts` (server-only).

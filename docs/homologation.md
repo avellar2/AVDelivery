@@ -9,6 +9,11 @@ item de endurecimento não bloqueante pendente (proteção de senhas vazadas, co
 painel). A 7A implementou e exercitou inbox durável, leases, retry, dead letter, worker e
 conciliação automática, mas o cron não foi ativado em ambiente publicado com URL estável.
 
+A **Etapa 7A.1**, executada em 2026-11-05, publicou o aplicativo em HTTPS por túnel autorizado, ligou
+o agendador (worker a cada minuto, conciliação a cada 15 minutos) e comprovou entrega externa real do
+Asaas Sandbox, processamento automático, concorrência, recuperação de lease e de backlog. Permanece
+**parcial** porque a URL do túnel é efêmera e não existe alerta externo configurado.
+
 As Etapas 3, 4 e 5 foram validadas contra o projeto Supabase real de homologação, com migrações
 aplicadas, integração, E2E e revisão visual em desktop e mobile. Na Etapa 5, o GPS web em primeiro
 plano foi validado; o envio com tela bloqueada/app em segundo plano permanece pendente por falta de
@@ -1243,3 +1248,90 @@ curl -H "Authorization: Bearer $env:BILLING_WORKER_SECRET" http://localhost:3000
 Nunca aponte `SUPABASE_TEST_*` para produção: a suíte cria e remove usuários, eventos e execuções.
 Ativação em ambiente real e cron exigem revisão deliberada; ver
 [billing-scheduler.md](billing-scheduler.md).
+
+## Homologação operacional da Etapa 7A.1 (2026-11-05)
+
+Objetivo: provar que o faturamento funciona **sem intervenção humana** — agendador chamando o worker
+e a conciliação, entrega externa real do Asaas e recuperação automática de falhas.
+
+**Status: HOMOLOGAÇÃO OPERACIONAL PARCIAL.** O ciclo automático foi comprovado em ambiente publicado
+por HTTPS, mas a URL é de túnel efêmero e não há alerta externo. Nenhuma cobrança real, nenhum
+acesso a produção e nenhum deploy financeiro.
+
+### Ambiente usado
+
+| Item             | Valor                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------- |
+| Aplicação        | `next start` local, porta 3000, build de produção                                                             |
+| Exposição        | túnel HTTPS autorizado (cloudflared quick tunnel)                                                             |
+| Endpoint público | `https://<aleatorio>.trycloudflare.com` (efêmero, encerrado ao fim da sessão)                                 |
+| Agendador        | `npm run billing:schedule` (novo script deste repositório)                                                    |
+| Cadência         | worker 60 s, conciliação 900 s                                                                                |
+| Segredo          | `BILLING_WORKER_SECRET` de 43 caracteres, só em `.env.local` (ignorado)                                       |
+| Webhook          | mesmo registro da 6B reapontado para o túnel, `enabled`, `interrupted: false`, 16 eventos, `NON_SEQUENTIALLY` |
+
+Não há Vercel, Supabase Cron/pg_net nem outro agendador contratado: `pg_cron`/`pg_net` continuam
+desabilitados no projeto e, sem endpoint público estável, ativá-los não teria efeito prático.
+
+### Evidências
+
+| Verificação                                                                | Resultado                                                                                                                              |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Reativação do webhook reenviou a fila do Asaas                             | 3 eventos externos recebidos às 16:44:01–02 UTC, `attempts: 0`, processados só às 16:44:44–46                                          |
+| Novo evento real (pagamento simulado em Sandbox às 16:47:05)               | webhook recebido 16:47:07 com `attempts: 0`; processado pelo worker agendado às 16:47:35, sem chamada manual                           |
+| Efeito financeiro do pagamento                                             | fatura `paid` com `paid_at` do provedor, assinatura `active`, loja `active` e `hasAccess: true`                                        |
+| Reenvio do mesmo evento (2×)                                               | `200 {"duplicate":true}` nas duas vezes; fatura e período inalterados                                                                  |
+| Token inválido no webhook                                                  | `401 invalid_token`                                                                                                                    |
+| Duas execuções concorrentes do worker                                      | chamada A reivindicou 2 eventos, chamada B reivindicou 0; cada evento processado uma única vez                                         |
+| Evento fora de ordem (`PAYMENT_CREATED` reenviado após `PAYMENT_RECEIVED`) | fatura permaneceu `paid`, mesmo `paid_at` e mesmo período                                                                              |
+| Lease expirado de worker "morto"                                           | evento em `processing` com lease vencido voltou ao fluxo, foi reprocessado (`attempts: 2`) e o lease foi limpo                         |
+| Backlog detectado                                                          | com o agendador parado, `/admin/billing` exibiu "pendentes há mais de 5 minutos" e "processador não executa há mais de 10 minutos"     |
+| Recuperação automática                                                     | ao religar o agendador, o evento de 16:51:03 foi processado às 17:02:34 e os alertas de backlog/worker desapareceram                   |
+| Falha transitória do provedor                                              | evento apontando para pagamento inexistente ficou `failed` com `provider_payment_not_found`, `next_attempt_at` no futuro e lease limpo |
+| Cadência real observada                                                    | 15 execuções do worker em ~15 min (intervalo efetivo de ~61 s) e conciliação às 17:07:07 e 17:22:15 UTC                                |
+| Execuções de conciliação                                                   | `succeeded` com 4 pagamentos reconciliados, 0 divergências e 0 erros                                                                   |
+| Rotas internas publicamente expostas                                       | `401` sem segredo e com segredo fora da faixa; nunca `200`                                                                             |
+
+### Os 8 eventos em dead letter
+
+Todos foram gerados em 2026-11-04 entre 17:50 e 17:54, com `attempts: 8` e
+`last_error = attempts_exhausted:external_subscription_unknown`. A consulta ao Asaas Sandbox
+identificou a origem:
+
+| Recurso                | Situação no provedor                                  | Vínculo              |
+| ---------------------- | ----------------------------------------------------- | -------------------- |
+| `sub_gfe01aulya6o4tdu` | `deleted: true`, `externalReference: probe-pix-check` | sondagem da 6B       |
+| `sub_knctzveer5zak8ti` | `deleted: true`, `externalReference: probe-pix-today` | sondagem da 6B       |
+| `pay_vg8ejrd3zh1rocen` | `deleted: true`, `PENDING`, R$ 59,90                  | filho da 1ª sondagem |
+| `pay_i57f3dzq7c0j7mc7` | `deleted: true`, `PENDING`, R$ 59,90                  | filho da 2ª sondagem |
+
+Os dois eventos `SUBSCRIPTION_CREATED`, dois `SUBSCRIPTION_DELETED`, dois `PAYMENT_CREATED` e dois
+`PAYMENT_DELETED` descrevem exatamente o ciclo de vida dessas duas sondagens, que nunca foram
+vinculadas a `subscriptions.external_subscription_id`. **Classificação: esperado.** Não houve
+impacto financeiro, nenhum evento foi apagado e nenhum foi reprocessado automaticamente.
+
+### O que continua pendente
+
+- [ ] URL HTTPS **estável** (Vercel, domínio próprio ou túnel nomeado) com o agendador em execução
+      contínua e monitorada.
+- [ ] Alerta externo (e-mail, Slack, APM) para dead letter, worker parado e divergência de
+      conciliação. Não há serviço autorizado disponível; o script apenas imprime `ALERTA` no log.
+- [ ] Reprocessamento administrativo de dead letter pela interface.
+- [ ] Rotação do `ASAAS_WEBHOOK_TOKEN` e do `BILLING_WORKER_SECRET` antes de qualquer uso real.
+
+**Conclusão: ETAPA 7A COM HOMOLOGAÇÃO OPERACIONAL PARCIAL.** O faturamento automático foi
+comprovado de ponta a ponta em ambiente publicado por HTTPS, com processamento fora do ciclo HTTP,
+idempotência, concorrência segura e recuperação de falhas. A etapa não é declarada completa porque a
+publicação é temporária e não existe alerta externo.
+
+### Reprodução da Etapa 7A.1
+
+```powershell
+npm run build
+npm run start                     # porta 3000
+# em outro terminal, publique a porta 3000 em HTTPS (cloudflared, Vercel ou equivalente)
+npm run billing:schedule -- --base-url https://SEU-DOMINIO
+```
+
+O script `scripts/billing-scheduler.mjs` exige `BILLING_WORKER_SECRET` (ou `CRON_SECRET`) com 32 a
+255 caracteres e só aceita HTTPS fora de localhost.

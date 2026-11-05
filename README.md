@@ -5,8 +5,13 @@ Comercialização por assinatura mensal por estabelecimento, sem comissão por p
 
 **Status atual: Etapas 1, 2, 3 e 4 homologadas; Etapa 5 com homologação parcial; Etapas 5B e 5C
 com aplicativo Android validado apenas em emulador; Etapa 6A implementada; Etapa 6B homologada no
-Asaas Sandbox (2026-11-04); Etapa 7A com homologação parcial (2026-11-05), com produção não
-ativada** em projeto Supabase exclusivo de testes (2026-10-29 a 2026-11-05).
+Asaas Sandbox (2026-11-04); Etapa 7A com homologação operacional parcial (2026-11-05), com produção
+não ativada** em projeto Supabase exclusivo de testes (2026-10-29 a 2026-11-05).
+
+A Etapa 7A.1 publicou o aplicativo por HTTPS, ligou o agendador (worker a cada minuto, conciliação a
+cada 15 minutos) e comprovou entrega externa real do Asaas Sandbox, processamento automático,
+duplicidade idempotente, concorrência e recuperação de lease e de backlog. A etapa continua parcial
+porque a URL usada foi um túnel efêmero e não há alerta externo configurado.
 
 A plataforma entrega autenticação, isolamento multiempresa por RLS, painel do estabelecimento,
 superadministrador, cardápio digital com categorias/produtos/adicionais e imagens, página pública
@@ -191,7 +196,8 @@ Para exercitar a cobrança da Etapa 6B:
 4. Rode `npm run dev`, entre como owner e abra `/dashboard/assinatura`.
 5. Para processar webhooks e conciliar automaticamente, configure `BILLING_WORKER_SECRET` (ou
    `CRON_SECRET`) e chame as rotas internas por um cron confiável. Sem agendador, os eventos ficam
-   pendentes e `/admin/billing` acusa `worker_not_running`. Ver
+   pendentes e `/admin/billing` acusa `worker_not_running`. Para homologação local, publique a porta
+   3000 em HTTPS e rode `npm run billing:schedule -- --base-url https://SEU-DOMINIO`. Ver
    [docs/billing-scheduler.md](docs/billing-scheduler.md).
 
 Sem essas variáveis, a cobrança fica desabilitada e o webhook responde `503`; o restante do produto
@@ -527,10 +533,13 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - Não há gestão de funcionários na interface (apenas o modelo e as políticas).
 - Cobrança somente em **Asaas Sandbox**, homologada de ponta a ponta em 2026-11-04 (cobrança Pix,
   confirmação simulada, webhook autenticado e liberação da loja). Não há ativação de produção.
-- A Etapa 7A adicionou inbox durável, worker, leases, retry, dead letter e conciliação automática,
-  mas o cron **não está ativo por padrão**: é preciso configurar `BILLING_WORKER_SECRET`/`CRON_SECRET`
-  e um agendador após o deploy. Sem ele, o webhook só persiste e a loja não é liberada. Ver
+- A Etapa 7A adicionou inbox durável, worker, leases, retry, dead letter e conciliação automática, e
+  a 7A.1 comprovou o ciclo automático em ambiente publicado. Ainda assim o cron **não está ativo por
+  padrão**: é preciso configurar `BILLING_WORKER_SECRET`/`CRON_SECRET` e um agendador estável após o
+  deploy. Sem ele, o webhook só persiste e a loja não é liberada. Ver
   [docs/billing-scheduler.md](docs/billing-scheduler.md).
+- Não há alerta externo (e-mail/Slack/APM) para worker parado, dead letter ou divergência de
+  conciliação; o diagnóstico vive em `/admin/billing` e no log do agendador local.
 - O webhook responde `200` somente após persistir (nunca `202`) e não processa finanças na requisição.
   Dead letters exigem revisão manual; não há envio externo de alerta.
 - Cobrança por Pix é pagamento por ciclo, **não débito automático**. Não há cartão, nota fiscal,

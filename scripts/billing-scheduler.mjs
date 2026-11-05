@@ -131,10 +131,12 @@ function schedule(path, intervalMs, onResult) {
   let timer = null;
 
   const tick = async () => {
+    const startedAt = Date.now();
     const result = await call(path);
     await onResult(result);
     if (running) {
-      timer = setTimeout(tick, intervalMs);
+      const elapsed = Date.now() - startedAt;
+      timer = setTimeout(tick, Math.max(1_000, intervalMs - elapsed));
     }
   };
 

@@ -14,6 +14,17 @@ A Etapa 7A separou **recebimento** de **processamento**: a rota HTTP apenas aute
 persiste o evento. Nenhuma chamada financeira ao Asaas acontece dentro da requisição do webhook. O
 processamento é feito fora do ciclo HTTP por um processador protegido, descrito abaixo.
 
+Na Etapa 7A.1 o endpoint foi publicado em HTTPS e o registro do Asaas Sandbox foi reapontado com
+`interrupted: false` e `authToken` configurado. A fila represada foi reenviada, três eventos chegaram
+com `attempts: 0` e um novo pagamento simulado gerou `PAYMENT_RECEIVED` dois segundos depois da
+confirmação no provedor — persistido na hora e processado pelo worker agendado cerca de 28 s depois.
+Reenvios do mesmo evento devolveram `200 duplicate: true` sem repetir efeito financeiro. Evidências
+em [homologation.md](homologation.md).
+
+Se o endpoint ficar indisponível por muito tempo, o Asaas marca o webhook como `interrupted` e para
+de entregar. Ao voltar, reapontar a URL e reativar o registro faz o provedor reenviar a fila; a
+inbox deduplica o que já foi processado.
+
 ## Contrato de resposta HTTP
 
 O Asaas considera **somente HTTP 200** como entrega bem-sucedida. Este endpoint nunca responde

@@ -246,12 +246,13 @@ ponta. Produção continua explicitamente fora do escopo desta etapa.
 
 ## Etapa 7A — Hardening financeiro, webhooks e resiliência (homologação parcial em 2026-11-05)
 
-> **Homologação parcial.** Inbox durável, ACK `200`, processador fora do ciclo HTTP, leases,
-> recuperação de processo morto, retry com backoff, dead letter, conciliação automática, job runs e
-> diagnóstico de saúde foram implementados e exercitados contra o Supabase de homologação. O cron
-> **não foi ativado** em ambiente publicado com URL estável; por isso a etapa não é declarada
-> totalmente homologada. Ver [homologation.md](homologation.md) e
-> [billing-scheduler.md](billing-scheduler.md).
+> **Homologação operacional parcial** (2026-11-05). Inbox durável, ACK `200`, processador fora do
+> ciclo HTTP, leases, recuperação de processo morto, retry com backoff, dead letter, conciliação
+> automática, job runs e diagnóstico de saúde foram implementados e exercitados contra o Supabase de
+> homologação. Na **Etapa 7A.1** o app foi publicado por túnel HTTPS e o agendador rodou de verdade:
+> nova entrega externa do Asaas, processamento automático, concorrência, recuperação de lease e de
+> backlog foram comprovados. Permanece parcial porque a URL é efêmera e não há alerta externo. Ver
+> [homologation.md](homologation.md) e [billing-scheduler.md](billing-scheduler.md).
 
 Entregue:
 
@@ -270,9 +271,12 @@ Entregue:
 - [x] Diagnóstico `/admin/billing` com alertas de backlog, lease, dead letter e última execução.
 - [x] Token do webhook alinhado à faixa oficial do Asaas (32–255).
 - [x] `vercel.json` com as cadências sugeridas; ativação depende de deploy e configuração.
+- [x] Agendador real (`npm run billing:schedule`) executando worker a cada minuto e conciliação a
+      cada 15 minutos em ambiente publicado por HTTPS, com entrega externa do Asaas Sandbox,
+      reenvio idempotente, concorrência, recuperação de lease e de backlog comprovados.
 - [x] Testes unitários e de integração real cobrindo concorrência, lease, recuperação, dead letter,
       permissões e ausência de PII.
-- [ ] Ativar o cron em ambiente publicado com URL HTTPS estável e comprovar execução contínua.
+- [ ] URL HTTPS **estável** (Vercel, domínio próprio ou túnel nomeado) com execução contínua.
 - [ ] Alerta externo (e-mail/Slack/APM) para falha de worker, dead letter e divergência.
 
 Fora do escopo da 7A: produção, cartão, nota fiscal, MFA/auditoria administrativa ampla, rate limit

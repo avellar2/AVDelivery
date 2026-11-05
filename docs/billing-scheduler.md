@@ -2,14 +2,16 @@
 
 O processador de webhook e a conciliação são **rotas internas**; eles não se autoexecutam. Este
 documento explica como configurar um cron externo com segurança, quais limites considerar e o que
-verificar. **Nenhum agendador está ativo nesta entrega.**
+verificar. **Nenhum agendador permanente está ativo nesta entrega.** Na homologação da Etapa 7A.1 o
+agendador usado foi o script local descrito abaixo, apontado para um túnel HTTPS efêmero — ver
+[homologation.md](homologation.md).
 
 ## Rotas
 
-| Rota | Cadência sugerida                     | Função     |
-| ---- | ------------------------------------- | ---------- |
-| `GET | POST /api/internal/billing/worker`    | 1 minuto   | processa a inbox durável          |
-| `GET | POST /api/internal/billing/reconcile` | 15 minutos | concilia assinaturas e pagamentos |
+| Rota                                            | Cadência sugerida | Função                            |
+| ----------------------------------------------- | ----------------- | --------------------------------- |
+| `/api/internal/billing/worker` (GET ou POST)    | 1 minuto          | processa a inbox durável          |
+| `/api/internal/billing/reconcile` (GET ou POST) | 15 minutos        | concilia assinaturas e pagamentos |
 
 Ambas:
 
@@ -21,6 +23,37 @@ Ambas:
 - são seguras para chamadas concorrentes: a reivindicação é atômica (`FOR UPDATE SKIP LOCKED`) e a
   conciliação é idempotente;
 - devolvem JSON sanitizado, sem payload, token, documento ou chave.
+
+## Agendador local do repositório (homologação)
+
+`scripts/billing-scheduler.mjs` chama as duas rotas na cadência esperada, sem depender de plataforma:
+
+```powershell
+npm run billing:schedule -- --base-url https://SEU-DOMINIO
+```
+
+- worker a cada 60 s e conciliação a cada 900 s (ajustável por `BILLING_SCHEDULER_WORKER_MS` e
+  `BILLING_SCHEDULER_RECONCILE_MS`);
+- usa `BILLING_WORKER_SECRET` (fallback `CRON_SECRET`), 32–255 caracteres, em header `Bearer`;
+- recusa HTTP fora de `localhost`;
+- registra por execução o status, a duração e as contagens devolvidas pela rota, sem payload nem
+  segredo;
+- imprime `ALERTA` após 3 falhas seguidas do worker ou 2 da conciliação.
+
+Ele **não** é um serviço: precisa de um supervisor e de um processo sempre vivo. Para operação real
+use um cron da plataforma. O log local não substitui alerta externo.
+
+### Túnel HTTPS temporário
+
+Um túnel rápido (`cloudflared tunnel --url http://localhost:3000`) expõe a aplicação local para
+homologação sem conta. Cuidados:
+
+- a URL muda a cada execução e não há SLA — não serve para operação;
+- ao reapontar o webhook, atualize o registro no Asaas com a nova URL e o `authToken`;
+- se o túnel cair, o Asaas marca o webhook como `interrupted` e reenvia a fila quando ele volta com
+  `interrupted: false` e a URL correta;
+- a aplicação exposta continua exigindo `asaas-access-token` no webhook e segredo de worker nas rotas
+  internas; nada de produção roda nesse processo.
 
 ## Vercel Cron
 
