@@ -229,7 +229,7 @@ Entregue:
 - [x] Aplicação transacional que valida loja, cliente, assinatura, valor exato do plano, moeda e
       transições; libera somente após pagamento confirmado.
 - [x] Tratamento de atraso, carência de 5 dias, estorno, chargeback, reativação e evento atrasado.
-- [x] Conciliação manual reenviável (`npm run billing:reconcile`) sem inventar worker/agendador.
+- [x] Conciliação reenviável (`npm run billing:reconcile` e rota automática da Etapa 7A).
 - [x] Tela `/dashboard/assinatura` com perfil, valor, estado, histórico, link/Pix, aviso explícito de
       Sandbox e sem botão “Pagar agora”.
 - [x] Testes unitários, integração real com pagamentos simulados e E2E; suítes anteriores verdes.
@@ -237,12 +237,46 @@ Entregue:
 - [x] Homologação externa no Asaas Sandbox: cobrança Pix real, confirmação do provedor, webhook
       autenticado, duplicidade/reenvio idempotentes e conciliação reenviável.
 
-Fora do escopo: produção, cartão, nota fiscal, worker/fila, autoatendimento de troca de plano,
-notificações de cobrança e contratação/aceite de contrato. Ver
+Fora do escopo: produção, cartão, nota fiscal, autoatendimento de troca de plano, notificações de
+cobrança e contratação/aceite de contrato. Worker e conciliação automática vieram na Etapa 7A. Ver
 [billing-production-limits.md](billing-production-limits.md) e [billing-costs.md](billing-costs.md).
 
 Critério de pronto: **atendido no Asaas Sandbox** — ciclo externo completo comprovado de ponta a
 ponta. Produção continua explicitamente fora do escopo desta etapa.
+
+## Etapa 7A — Hardening financeiro, webhooks e resiliência (homologação parcial em 2026-11-05)
+
+> **Homologação parcial.** Inbox durável, ACK `200`, processador fora do ciclo HTTP, leases,
+> recuperação de processo morto, retry com backoff, dead letter, conciliação automática, job runs e
+> diagnóstico de saúde foram implementados e exercitados contra o Supabase de homologação. O cron
+> **não foi ativado** em ambiente publicado com URL estável; por isso a etapa não é declarada
+> totalmente homologada. Ver [homologation.md](homologation.md) e
+> [billing-scheduler.md](billing-scheduler.md).
+
+Entregue:
+
+- [x] Webhook responde `200` somente após persistir; `202` removido do contrato; falha de persistência
+      responde `500`.
+- [x] Nenhuma chamada financeira ao Asaas dentro da requisição do webhook.
+- [x] Inbox com `next_attempt_at`, `lease_token`, `lease_expires_at`, `last_attempt_at` e
+      `dead_lettered_at`, com constraints/trigger de invariantes.
+- [x] Reivindicação atômica com `FOR UPDATE SKIP LOCKED`, conclusão/falha vinculadas ao lease e
+      recuperação de lease expirado.
+- [x] Retry exponencial com jitter, limite de tentativas, falha permanente direto para `dead_letter`
+      e motivo sanitizado.
+- [x] Rotas internas protegidas por segredo de 32–255 caracteres e comparação em tempo constante.
+- [x] Conciliação automática com varredura de pagamentos recentes, detecção de cobranças órfãs e
+      `billing_job_runs`.
+- [x] Diagnóstico `/admin/billing` com alertas de backlog, lease, dead letter e última execução.
+- [x] Token do webhook alinhado à faixa oficial do Asaas (32–255).
+- [x] `vercel.json` com as cadências sugeridas; ativação depende de deploy e configuração.
+- [x] Testes unitários e de integração real cobrindo concorrência, lease, recuperação, dead letter,
+      permissões e ausência de PII.
+- [ ] Ativar o cron em ambiente publicado com URL HTTPS estável e comprovar execução contínua.
+- [ ] Alerta externo (e-mail/Slack/APM) para falha de worker, dead letter e divergência.
+
+Fora do escopo da 7A: produção, cartão, nota fiscal, MFA/auditoria administrativa ampla, rate limit
+distribuído, CSP e observabilidade externa. A Etapa 7B não foi iniciada.
 
 ## Etapa 7 — Endurecimento
 
@@ -273,4 +307,5 @@ ponta. Produção continua explicitamente fora do escopo desta etapa.
 - Rastreamento GPS em segundo plano homologado — a implementação Android foi exercitada só em
   emulador, com posição simulada; aparelho físico e iOS continuam pendentes.
 - Marketplace ou comissão por pedido.
-- Microsserviços, filas ou Kubernetes.
+- Microsserviços, brokers de fila externos (SQS/RabbitMQ) ou Kubernetes. A inbox durável no
+  PostgreSQL e o cron externo atendem ao escopo atual.

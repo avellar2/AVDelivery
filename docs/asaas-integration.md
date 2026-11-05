@@ -21,7 +21,7 @@ implementação.
 | `ASAAS_ENVIRONMENT`   | não         | Se informada, deve ser exatamente `sandbox`. Qualquer outro valor falha. |
 | `ASAAS_BASE_URL`      | não         | Padrão `https://api-sandbox.asaas.com/v3`. HTTPS, host e caminho exatos. |
 | `ASAAS_API_KEY`       | sim         | Chave do Sandbox, sem espaços, mínimo de 20 caracteres.                  |
-| `ASAAS_WEBHOOK_TOKEN` | sim         | Token do webhook, sem espaços, mínimo de 24 caracteres.                  |
+| `ASAAS_WEBHOOK_TOKEN` | sim         | Token do webhook, sem espaços, 32 a 255 caracteres.                      |
 | `ASAAS_USER_AGENT`    | não         | Padrão `AVDelivery/1.0`; enviado em todas as requisições.                |
 | `ASAAS_TIMEOUT_MS`    | não         | Padrão 15.000 ms.                                                        |
 
@@ -110,8 +110,10 @@ campos exibidos na própria assinatura, mas não pode escrevê-los.
   detalhes internos. O erro técnico é registrado sem segredos.
 - Repetir “Gerar cobrança” reutiliza a requisição/assinatura quando possível; não cria uma segunda
   assinatura ativa para a mesma loja.
-- Não existe processamento assíncrono próprio: webhooks são processados na requisição e a
-  conciliação é um comando manual. Ver [billing-reconciliation.md](billing-reconciliation.md).
+- O webhook apenas persiste o evento e responde `200`; o processamento financeiro ocorre fora do
+  ciclo HTTP, em rota protegida, com lease/retry/dead letter. A conciliação automática usa o mesmo
+  núcleo do comando manual. Ver [webhooks.md](webhooks.md) e
+  [billing-reconciliation.md](billing-reconciliation.md).
 
 ## Arquivos
 

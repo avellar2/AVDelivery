@@ -1,8 +1,8 @@
 # Idempotência da cobrança
 
-A cobrança da Etapa 6B é idempotente em três camadas: requisição do proprietário, evento de webhook e
-aplicação do pagamento. Nenhuma camada depende de o navegador ou o provedor enviar exatamente uma
-vez.
+A cobrança é idempotente em quatro camadas: requisição do proprietário, recebimento do webhook,
+processamento assíncrono sob lease e aplicação do pagamento. Nenhuma camada depende de o navegador,
+o provedor ou o worker executar exatamente uma vez.
 
 ## Camadas e chaves
 
@@ -10,7 +10,8 @@ vez.
 | ------------------------- | ------------------------------------------------------------ | ----------------------------------------------------- |
 | Checkout do owner         | `billing_checkout_requests (store_id, request_id)`           | devolve a mesma requisição; não cria outra assinatura |
 | Assinatura externa        | `subscriptions (provider, external_subscription_id)` parcial | conflito se outra loja usar o mesmo id                |
-| Evento de webhook         | `billing_webhook_events (provider, external_event_id)`       | `200 duplicate`; não reaplica                         |
+| Recebimento de webhook    | `billing_webhook_events (provider, external_event_id)`       | `200 duplicate`; não reaplica                         |
+| Processamento do webhook  | `FOR UPDATE SKIP LOCKED` + `lease_token` único               | outro worker não recebe o mesmo evento                |
 | Pagamento                 | `invoices (provider, external_payment_id)` parcial           | atualiza a mesma fatura                               |
 | Evento comercial          | `subscription_events.dedupe_key` único quando presente       | `ON CONFLICT DO NOTHING`                              |
 | Período pago              | só estende se `novo_period_end > current_period_end`         | repetição não soma meses                              |
@@ -42,15 +43,32 @@ deve criar outra assinatura. A garantia real, porém, está no banco e na busca 
 
 ## Webhook
 
-- O evento é inserido primeiro. Violação de unicidade (`23505`) significa duplicata.
-- `processed`/`ignored` retornam sem processar.
-- A reivindicação é condicional: `UPDATE ... WHERE id = ? AND status IN ('received','failed')`.
-  - Sem linha reivindicada e status `processing` → `202`, sem duplicar.
-  - `failed` pode ser reivindicado novamente em uma reentrega.
-- O evento só é marcado `processed` **depois** de a RPC transacional concluir. A ordem é:
-  persistir → reivindicar → consultar o provedor → aplicar → marcar.
-- Se o processo falhar entre aplicar e marcar, a reentrega reaplica o mesmo pagamento; o banco
-  reconhece a fatura e o `dedupe_key`, sem estender o período novamente.
+- A rota HTTP autentica, valida e **persiste primeiro**. Violação de unicidade (`23505`) é convertida
+  no evento existente; a resposta é `200` com `duplicate: true`.
+- `receive → processar fora da requisição` é a separação da Etapa 7A. A rota não consulta o provedor
+  nem chama a RPC financeira; por isso não existe `202` nem processamento síncrono.
+- Estados terminais (`processed`, `ignored`, `dead_letter`) não são reivindicados nem rebaixados por
+  uma reentrega. O evento só é marcado `processed` **depois** de a RPC transacional concluir.
+- O worker reivindica com `UPDATE ... FOR UPDATE SKIP LOCKED` dentro de
+  `billing_claim_webhook_events`. A reivindicação incrementa `attempts` de forma atômica e grava
+  `lease_token`/`lease_expires_at`. Dois workers simultâneos recebem eventos diferentes.
+- Conclusão e falha exigem o `lease_token` recebido na reivindicação. Um worker cujo lease expirou não
+  consegue sobrescrever o resultado do outro: recebe `lease_mismatch`.
+- Processo que morre no meio do evento deixa o lease expirar. A execução seguinte recupera o evento
+  como `failed` (ou `dead_letter`, se já esgotou as tentativas). Nada fica preso em `processing`.
+- Se o processo falhar entre aplicar o pagamento e marcar o evento, a reaplicação usa a mesma fatura e
+  o mesmo `dedupe_key`; não estende o período novamente.
+
+## Retry e dead letter
+
+- Falha transitória: volta para `failed` com `next_attempt_at` calculado por backoff exponencial com
+  jitter, `attempts` já incrementado. Pode ser reivindicada por qualquer worker após o prazo.
+- Falha permanente (divergência de valor/moeda/cliente, recurso local ausente, status inválido):
+  vai direto para `dead_letter`, sem repetir o que não pode ser corrigido por retry.
+- Tentativas esgotadas (`BILLING_WORKER_MAX_ATTEMPTS`, padrão 8): `dead_letter` com
+  `attempts_exhausted:<motivo>`.
+- `dead_letter` é terminal. Reprocessar exige revisão humana e reabertura explícita; não existe
+  retry automático de falha permanente. A página `/admin/billing` sinaliza o evento.
 
 ## Aplicação do pagamento
 

@@ -269,8 +269,12 @@ grant de escrita para `anon` ou `authenticated`: a única porta de escrita são 
   host parecido e caminho diferente de `/v3`. `ASAAS_ENVIRONMENT` diferente de `sandbox` lança erro.
   O script de conciliação repete a checagem e encerra se não for Sandbox.
 - **Webhook:** autenticação oficial por `asaas-access-token`, comparada em tempo constante com
-  SHA-256 + `timingSafeEqual`. Sem token forte configurado, responde `503`; token inválido, `401`.
-  Não há HMAC inventado. Limite de 256 KiB antes e depois de ler o corpo.
+  SHA-256 + `timingSafeEqual`. O token deve ter 32–255 caracteres; sem configuração válida, responde
+  `503`; token inválido, `401`. Não há HMAC inventado. Limite de 256 KiB antes e depois de ler o
+  corpo.
+- **ACK correto:** a rota só responde `200` depois da persistência durável e nunca usa `202` como
+  confirmação, pois o Asaas só considera `200` como entrega bem-sucedida. Falha de persistência →
+  `500`, para o provedor reenviar.
 - **O payload não é prova:** o processador consulta `GET /payments/{id}` ou
   `GET /subscriptions/{id}` e aplica apenas o estado autoritativo. Um corpo forjado não ativa loja.
 - **Sem confiança em `store_id`:** a associação vem de `subscriptions.external_subscription_id` e
@@ -278,18 +282,34 @@ grant de escrita para `anon` ou `authenticated`: a única porta de escrita são 
 - **Valor e moeda:** a RPC exige exatamente `plans.price_cents`, moeda `BRL`, assinatura externa e
   cliente externo correspondentes. Divergência gera erro e não altera fatura.
 - **Idempotência durável:** `billing_webhook_events (provider, external_event_id)` único; evento
-  persistido antes do processamento; reivindicação condicional; `processed` só ao final. Repetição
-  não estende período nem duplica `subscription_events`.
+  persistido antes do processamento; reivindicação atômica com `FOR UPDATE SKIP LOCKED`; `processed`
+  só ao final. Repetição não estende período nem duplica `subscription_events`.
+- **Lease e recuperação:** cada reivindicação grava `lease_token`/`lease_expires_at`; conclusão e
+  falha exigem o token. Lease expirado é recuperado pelo worker; tentativas esgotadas viram
+  `dead_letter`, nunca ficam presas em `processing`.
+- **Falha permanente não é retry infinito:** divergência de valor/moeda/cliente, recurso local
+  ausente ou status inválido vai direto para `dead_letter`. Backoff com jitter só para falhas
+  transitórias, com máximo de tentativas.
+- **Rotas internas protegidas:** `/api/internal/billing/worker` e `/api/internal/billing/reconcile`
+  exigem `Authorization: Bearer` com `BILLING_WORKER_SECRET` (fallback `CRON_SECRET`), 32–255
+  caracteres, comparação em tempo constante. Sem segredo forte → `503`; divergente → `401`. Não há
+  chamada financeira dentro do webhook.
 - **Caixa de entrada isolada:** `billing_webhook_events` não tem política para `authenticated`/`anon`;
-  somente `service_role` acessa.
+  somente `service_role` acessa. `billing_job_runs` tem RLS e privilégios apenas para `service_role`.
+- **Diagnóstico sem PII:** `admin_get_billing_health` é `SECURITY DEFINER`, repete a checagem de
+  `platform_admins` internamente e devolve apenas contagens, estados, códigos de erro e timestamps —
+  nunca payload, documento, token ou chave.
 - **Escrita do owner negada:** `billing_customers` e `billing_checkout_requests` têm RLS de leitura por
   loja; não há `INSERT/UPDATE/DELETE` direto. `owner_upsert_billing_profile` e
   `owner_get_billing_profile` verificam `auth.uid()` e papel `owner` internamente.
 - **Funções de serviço:** `billing_bind_customer`, `billing_begin_checkout`,
   `billing_complete_checkout`, `billing_fail_checkout`, `billing_apply_payment_event`,
-  `billing_update_external_subscription_status` e `billing_reconciliation_candidates` são
-  `SECURITY DEFINER` com `search_path = ''`, `EXECUTE` revogado de `public/anon/authenticated` e
-  concedido somente a `service_role`.
+  `billing_update_external_subscription_status`, `billing_reconciliation_candidates`,
+  `billing_receive_webhook_event`, `billing_claim_webhook_events`,
+  `billing_recover_stale_webhook_events`, `billing_complete_webhook_event` e
+  `billing_fail_webhook_event` são `SECURITY DEFINER` com `search_path = ''`, `EXECUTE` revogado de
+  `public/anon/authenticated` e concedido somente a `service_role`. `admin_get_billing_health` é
+  concedido a `authenticated` e `service_role`, mas exige `private.is_platform_admin()` no corpo.
 - **Nenhum dado de cartão:** não há formulário de cartão, CVV ou tokenização própria. O pagamento
   ocorre no link/QR oficial do Asaas; o AVDelivery armazena apenas URL HTTPS validada e Pix copia e
   cola.
@@ -298,8 +318,10 @@ grant de escrita para `anon` ou `authenticated`: a única porta de escrita são 
 - **Documento pessoal:** o perfil guarda CPF/CNPJ porque o provedor exige; o metadata de auditoria
   registra apenas o tipo (`cpf`/`cnpj`), nunca o número. Chaves e tokens nunca são exibidos.
 - **Sem produção:** a aplicação não tem caminho para `api.asaas.com`; não há fallback silencioso.
-- **Sem worker:** webhooks são síncronos e a conciliação é manual; isso está documentado e não é
-  apresentado como processamento assíncrono confiável.
+- **Processamento fora do ciclo HTTP:** webhooks são persistidos na requisição e processados por
+  rota interna protegida. A existência do código não garante agendamento: sem um cron configurado no
+  ambiente, o diagnóstico acusa `worker_not_running` e a loja não é liberada. Ver
+  [billing-scheduler.md](billing-scheduler.md).
 
 Advisor residual aceito: `owner_get_billing_profile` e `owner_upsert_billing_profile` aparecem como
 `SECURITY DEFINER` executáveis por `authenticated`, pois são a porta do owner; ambas validam sessão,
@@ -542,11 +564,11 @@ endereços nunca são logados.
    há exportação nem busca por documento.
 10. **Segurança do projeto Supabase** (acesso ao dashboard, chaves, backups) é parte da fronteira de
     confiança e deve ser protegida com MFA e rotação de chaves.
-11. **Homologação em 2026-10-29 a 2026-11-04** — integrações com Auth/PostgREST/Storage, 307 testes
+11. **Homologação em 2026-10-29 a 2026-11-05** — integrações com Auth/PostgREST/Storage, suíte
     Vitest e 17 E2E, incluindo login/logout, recuperação, cardápio/uploads, pedidos, entregas,
-    rastreamento, ciclo comercial e cobrança Sandbox interna. Pendências não bloqueantes: HIBP,
-    entrega real de e-mail, rotação após expiração de 1h e homologação externa do Asaas. Ver
-    [homologation.md](homologation.md).
+    rastreamento, ciclo comercial, cobrança Sandbox interna e externa, inbox durável, leases e
+    conciliação automática. Pendências não bloqueantes: HIBP, entrega real de e-mail e rotação após
+    expiração de 1h. Ver [homologation.md](homologation.md).
 12. **Bucket público** — imagens continuam acessíveis por URL mesmo após desativação; não usar para
     conteúdo privado.
 13. **Capacidade de grupos** — a consistência mínimo/máximo × opções é garantida nas ações do app e
@@ -579,23 +601,27 @@ endereços nunca são logados.
     posição é apagada ao concluir, cancelar, reatribuir ou parar o compartilhamento.
 24. **Cobrança em Sandbox, não em produção** — a integração Asaas da Etapa 6B foi homologada de ponta
     a ponta no Asaas Sandbox (cobrança Pix, confirmação simulada, webhook autenticado e liberação
-    transacional). Não há ativação em produção, nota fiscal, estorno automático pela UI ou
-    processamento assíncrono. A ativação por pagamento depende do webhook/conciliação verificados.
+    transacional). A Etapa 7A acrescentou processamento assíncrono, retry e dead letter. Não há
+    ativação em produção, nota fiscal, estorno automático pela UI nem agendador ativo por padrão.
+    A ativação por pagamento depende do worker/conciliação configurados.
 25. **Isenção e trial são regras comerciais** — um superadministrador pode ativar ou isentar
     manualmente, sempre com evento auditável. O trial não é renovável automaticamente e não há
     prevenção de abuso por múltiplas lojas na mesma organização nesta etapa.
-26. **Sem worker/fila de cobrança** — o processamento de webhook é síncrono na requisição; falhas
-    dependem de reentrega do Asaas ou de `npm run billing:reconcile`. Não há alerta automático de
-    falha nem dead-letter queue.
+26. **Agendador não está ativo por padrão** — o worker e a conciliação têm rotas protegidas, leases,
+    retry e dead letter, mas dependem de um cron externo configurado após o deploy. Sem ele, eventos
+    ficam pendentes e o diagnóstico acusa `worker_not_running`. Reprocessar um `dead_letter` exige
+    revisão e reabertura manual; não há botão nem retry automático de falha permanente.
 27. **Sem rate limit distribuído no webhook** — a proteção é token forte, limite de corpo, dedupe e
     consulta ao provedor. Um atacante que conheça o endpoint ainda pode gerar requisições inválidas;
     não há CAPTCHA (não aplicável a webhook) nem bloqueio por IP nesta etapa.
 28. **Dados de faturamento são pessoais** — CPF/CNPJ, e-mail, telefone e endereço são necessários ao
     provedor. Não há política automática de retenção/anonimização; a remoção da loja cascateia os
     dados locais, mas obrigações futuras podem exigir retenção separada.
-29. **Homologação externa pendente do Asaas** — a criação real de cobrança no Sandbox, a confirmação
-    simulada pelo provedor e o webhook externo autenticado não foram executados. Ver
-    [billing-sandbox.md](billing-sandbox.md).
+29. **Homologação da Etapa 7A é parcial, não uma promessa de agendamento** — worker, conciliação,
+    leases, recuperação, retry e dead letter foram exercitados contra o Supabase de homologação, mas
+    o cron não foi ativado em um ambiente publicado com URL estável. A homologação externa do Asaas
+    (cobrança Sandbox, confirmação simulada e webhook autenticado) foi concluída na Etapa 6B. Ver
+    [billing-sandbox.md](billing-sandbox.md) e [homologation.md](homologation.md).
 
 ## Checklist operacional
 
@@ -618,6 +644,10 @@ endereços nunca são logados.
 - [x] Etapa 5C: serviço em primeiro plano validado em emulador com tela bloqueada, Doze, bateria,
       rede e processo encerrado; APK sem `service_role`, com `allowBackup=false`, serviço não
       exportado e sessão cifrada por `AndroidKeyStore` (AES/GCM). Sem homologação física.
+- [x] Etapa 7A: webhook só persiste e responde `200`; rotas internas protegidas por segredo de 32–255
+      com comparação em tempo constante; leases, retry, dead letter e conciliação exercitados contra o
+      banco real; diagnóstico restrito a superadministrador e sem PII.
+- [ ] Ativar cron em ambiente publicado e alerta externo de falha/dead letter/divergência.
 - [ ] Revogação de permissão em tempo de execução e ciclo de reatribuição/conclusão no app.
 - [ ] Validar GPS físico e comportamento com tela bloqueada em Android e iOS.
 - [x] `service_role` usada apenas em scripts e em `src/lib/supabase/admin.ts` (server-only).

@@ -1,0 +1,163 @@
+# Agendamento do faturamento
+
+O processador de webhook e a conciliação são **rotas internas**; eles não se autoexecutam. Este
+documento explica como configurar um cron externo com segurança, quais limites considerar e o que
+verificar. **Nenhum agendador está ativo nesta entrega.**
+
+## Rotas
+
+| Rota | Cadência sugerida                     | Função     |
+| ---- | ------------------------------------- | ---------- |
+| `GET | POST /api/internal/billing/worker`    | 1 minuto   | processa a inbox durável          |
+| `GET | POST /api/internal/billing/reconcile` | 15 minutos | concilia assinaturas e pagamentos |
+
+Ambas:
+
+- exigem `Authorization: Bearer <segredo>` (ou `x-billing-worker-secret`);
+- aceitam `BILLING_WORKER_SECRET`; se ausente, `CRON_SECRET` é o fallback;
+- exigem segredo de 32–255 caracteres, sem espaços/caracteres de controle;
+- comparam em tempo constante e falham fechado (`503 job_not_configured`, `401 unauthorized`);
+- usam `runtime = "nodejs"`, `dynamic = "force-dynamic"` e `maxDuration = 60`;
+- são seguras para chamadas concorrentes: a reivindicação é atômica (`FOR UPDATE SKIP LOCKED`) e a
+  conciliação é idempotente;
+- devolvem JSON sanitizado, sem payload, token, documento ou chave.
+
+## Vercel Cron
+
+O repositório já contém `vercel.json`:
+
+```json
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    { "path": "/api/internal/billing/worker", "schedule": "* * * * *" },
+    { "path": "/api/internal/billing/reconcile", "schedule": "*/15 * * * *" }
+  ]
+}
+```
+
+Passos para ativar:
+
+1. Fazer deploy do projeto na Vercel (o arquivo só é lido no deploy).
+2. Definir `BILLING_WORKER_SECRET` (ou `CRON_SECRET`) nas variáveis de ambiente do projeto, com 32 a
+   255 caracteres. A Vercel envia `Authorization: Bearer $CRON_SECRET` automaticamente quando
+   `CRON_SECRET` existe; com apenas `BILLING_WORKER_SECRET`, configure um cron externo que envie o
+   header, ou use o nome `CRON_SECRET` como fallback.
+3. Confirmar em **Project → Settings → Cron Jobs** que os dois jobs aparecem com a cadência
+   esperada.
+4. Executar uma vez manualmente e conferir em `/admin/billing` que `lastWorkerRun` e
+   `lastReconciliationRun` foram registrados.
+
+**Limites de plano:** a cadência de 1 minuto e a de 15 minutos dependem do plano da Vercel. Planos
+gratuitos limitam a frequência (tipicamente uma execução por dia) e o número de crons; nesse caso o
+worker **não** roda a cada minuto e o diagnóstico acusará `worker_not_running`/`pending_backlog`.
+Confirme os limites atuais antes de considerar a cobrança operacional. Se o plano não permitir a
+cadência necessária, use outro agendador.
+
+A Vercel pode atrasar ou agrupar execuções; o worker foi desenhado para tolerar atraso e execução
+repetida, não para prometer latência de segundos.
+
+## Supabase Cron (`pg_cron` + `pg_net`)
+
+Alternativa quando o banco e o agendador já estão no mesmo projeto Supabase. **Não foi ativada nesta
+entrega.** O segredo não deve ficar no texto do job; use o Vault.
+
+```sql
+-- Pré-requisito: extensões pg_cron e pg_net habilitadas no projeto.
+-- Gravar o segredo no Vault (executar uma vez, fora do Git):
+--   select vault.create_secret('<segredo-32-255>', 'billing_worker_secret');
+
+select cron.schedule(
+  'billing-worker',
+  '* * * * *',
+  $$
+  select net.http_post(
+    url := 'https://SEU-DOMINIO/api/internal/billing/worker',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer ' || (
+        select decrypted_secret
+        from vault.decrypted_secrets
+        where name = 'billing_worker_secret'
+      )
+    ),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 55000
+  );
+  $$
+);
+
+select cron.schedule(
+  'billing-reconcile',
+  '*/15 * * * *',
+  $$
+  select net.http_post(
+    url := 'https://SEU-DOMINIO/api/internal/billing/reconcile',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer ' || (
+        select decrypted_secret
+        from vault.decrypted_secrets
+        where name = 'billing_worker_secret'
+      )
+    ),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 55000
+  );
+  $$
+);
+```
+
+Cuidados:
+
+- `pg_net` é assíncrono; o job agenda a chamada, não espera a resposta. O resultado fica em
+  `net._http_response` (schema interno, sujeito a mudança) e a fonte de verdade operacional é
+  `billing_job_runs` + `/admin/billing`.
+- O endpoint precisa ser público por HTTPS. Não aponte para `localhost`.
+- Não conceda execução direta das RPCs de inbox a `anon`/`authenticated`; o segredo e o endpoint são
+  a fronteira.
+- Remova os jobs com `select cron.unschedule('billing-worker');` (e o equivalente da conciliação).
+- Teste em homologação antes de qualquer ambiente real.
+
+## Outros agendadores
+
+Qualquer cron confiável serve (GitHub Actions com `schedule`, Cloud Scheduler, cron de VPS, serviço
+de uptime). Requisitos:
+
+- método `GET` ou `POST`;
+- header `Authorization: Bearer <segredo>`;
+- timeout de pelo menos 55 s;
+- não registrar o header em logs;
+- alerta quando a resposta não for `200`.
+
+## Concorrência e segurança
+
+- Várias execuções simultâneas são seguras: o claim é atômico e a conciliação usa as mesmas RPCs
+  idempotentes. Ainda assim, evite cadências sobrepostas desnecessárias; uma execução lenta pode
+  ocupar o orçamento de 55 s.
+- O segredo do worker é diferente do `ASAAS_WEBHOOK_TOKEN` e do `ASAAS_API_KEY`. Não reutilize.
+- Nunca coloque o segredo em `vercel.json`, no repositório, em query string ou em log.
+- Rotacione o segredo atualizando o ambiente e o agendador; a comparação é feita a cada requisição.
+- As rotas não são acessíveis pelo navegador do usuário e não aceitam sessão de owner/superadmin.
+
+## Custos e observabilidade
+
+- Cada execução é uma invocação de função. Worker a cada minuto = ~43.200 invocações/mês; conciliação
+  a cada 15 minutos = ~2.880/mês. Verifique o plano e o custo antes de ativar.
+- O worker para quando não há eventos elegíveis; ainda assim a invocação acontece.
+- `/admin/billing` mostra:
+  - `worker_not_running` (> 10 min sem execução);
+  - `worker_last_failed`, `reconciliation_not_running` (> 2 h) e `reconciliation_last_failed`;
+  - `pending_backlog`, `stale_processing` e `dead_letter`.
+- Não há envio de e-mail/Slack. Para alerta externo, monitore `billing_job_runs` ou a resposta das
+  rotas com a ferramenta de observabilidade escolhida.
+
+## Checklist de ativação
+
+- [ ] Deploy realizado com `vercel.json` (ou cron equivalente configurado).
+- [ ] `BILLING_WORKER_SECRET`/`CRON_SECRET` definido no ambiente, 32–255 caracteres.
+- [ ] Segredo diferente de `ASAAS_WEBHOOK_TOKEN` e `ASAAS_API_KEY`.
+- [ ] Execução manual retorna `200` e grava `billing_job_runs`.
+- [ ] `/admin/billing` sem `worker_not_running` e sem `reconciliation_not_running`.
+- [ ] Cadência compatível com o plano; alerta externo configurado.
+- [ ] Nenhum segredo em log, Git, URL ou resposta.

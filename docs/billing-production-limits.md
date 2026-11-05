@@ -1,7 +1,7 @@
 # Limitações antes de produção
 
-Este documento lista, sem maquiar, o que a Etapa 6B **não** cobre. Ele deve ser lido antes de ativar
-cobrança real.
+Este documento lista, sem maquiar, o que as Etapas 6B e 7A **não** cobrem. Ele deve ser lido antes de
+ativar cobrança real.
 
 ## Escopo do provedor
 
@@ -16,13 +16,26 @@ cobrança real.
 
 ## Processamento
 
-- **Sem worker, fila ou agendador.** Webhooks são processados de forma síncrona; a conciliação é um
-  comando manual (`billing:reconcile`). Não há retry assíncrono próprio além da reentrega do Asaas.
-- O endpoint de webhook precisa estar disponível; indisponibilidade gera reenvio pelo provedor e
-  depende de conciliação para recuperação.
-- Não há dead-letter queue dedicada; eventos ficam em `billing_webhook_events` com status `failed`.
-- Não há alerta automático de falha de webhook, divergência de conciliação ou inadimplência.
-- A aplicação processa um evento por requisição; não há processamento em lote interno.
+- **Worker e conciliação existem, mas o agendador não está ativo por padrão.** As rotas
+  `/api/internal/billing/worker` e `/api/internal/billing/reconcile` são protegidas por segredo e
+  precisam ser chamadas por um cron externo (Vercel Cron, Supabase Cron/`pg_net` ou equivalente). O
+  `vercel.json` declara a cadência, mas só produz efeito após deploy e configuração de
+  `BILLING_WORKER_SECRET`/`CRON_SECRET`.
+- O webhook **não** processa finanças na requisição: ele autentica, valida e persiste, respondendo
+  `200` somente após a gravação. O Asaas só aceita `200` como ACK; `202` não é usado.
+- A inbox tem lease, recuperação de processo morto, backoff com jitter, limite de tentativas e
+  `dead_letter` terminal. Reprocessar dead letter é manual.
+- A conciliação automática cobre pagamentos recentes e cobranças órfãs, mas examina no máximo 100
+  assinaturas por execução e 100 pagamentos recentes; o que exceder o lote fica para a próxima.
+- Sem cron ativo, indisponibilidade ou perda de webhook deixam eventos pendentes; a página
+  `/admin/billing` acusa `worker_not_running`/`pending_backlog`, mas **não há envio de alerta** por
+  e-mail/Slack.
+- Não há alerta automático externo de falha de webhook, divergência de conciliação ou inadimplência;
+  o diagnóstico é uma tela administrativa.
+- `billing_job_runs` usa a mesma tabela para as duas rotas; não há métrica exportada para
+  Prometheus/APM nem tracing distribuído.
+- O tempo de execução é limitado a ~55 s por chamada (`maxDuration = 60`); lotes maiores dependem de
+  várias execuções do cron.
 
 ## Segurança e operação
 
@@ -68,11 +81,11 @@ cobrança real.
 
 ## Antes de considerar produção
 
-1. Repetir a homologação em ambiente com URL HTTPS estável (o Sandbox já foi homologado; ver
-   [billing-sandbox.md](billing-sandbox.md)).
+1. Repetir a homologação em ambiente com URL HTTPS estável e **ativar o cron** para worker e
+   conciliação (o Sandbox já foi homologado; ver [billing-sandbox.md](billing-sandbox.md)).
 2. Revisar contrato, taxas, limites e obrigações fiscais com o provedor.
-3. Definir agendador externo para conciliação e alertas de falha.
+3. Configurar monitoramento externo das rotas de saúde/execução e alertas fora da aplicação.
 4. Implementar MFA/admin audit, CSP, rate limiting distribuído e observabilidade (Etapa 7).
-5. Definir política de retenção/anonimização de dados de faturamento.
+5. Definir política de retenção/anonimização de dados de faturamento e dos registros de webhook.
 6. Revisar a trava Sandbox e o processo de liberação de produção.
 7. Executar teste com valor real controlado somente após aprovação explícita do responsável.
