@@ -1,17 +1,8 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { reportServerError } from "@/lib/errors";
-import {
-  AsaasConfigurationError,
-  createAsaasClient,
-} from "@/modules/billing/providers/asaas/client";
-import {
-  resolveAsaasConfig,
-  resolveAsaasWebhookToken,
-} from "@/modules/billing/providers/asaas/config";
-import { processAsaasWebhookEvent } from "@/modules/billing/reconcile-core";
+import { ConfigurationError, reportServerError } from "@/lib/errors";
+import { resolveAsaasWebhookToken } from "@/modules/billing/providers/asaas/config";
 import {
   ASAAS_WEBHOOK_MAX_BYTES,
-  isSupportedEvent,
   parseAsaasWebhook,
   webhookTokenMatches,
 } from "@/modules/billing/providers/asaas/webhook";
@@ -31,25 +22,20 @@ function json(status: number, body: Record<string, unknown>): Response {
   });
 }
 
-function safeError(error: unknown): string {
-  if (error instanceof AsaasConfigurationError) {
-    return "configuration_error";
-  }
-
-  const message = error instanceof Error ? error.message : "processing_error";
-  return message.split("|")[0].slice(0, 500);
-}
-
 /**
- * Durable Asaas webhook endpoint.
+ * Durable Asaas webhook receipt endpoint.
  *
- * - Official authentication: `asaas-access-token` compared in constant time.
- * - No HMAC is invented; Asaas does not sign payloads with one here.
- * - The payload is persisted before processing and never trusted as proof of
- *   payment: the processor fetches the payment from Asaas first.
- * - Store association comes only from known external ids, never from a body
- *   field such as store_id.
- * - Duplicate deliveries are short-circuited by the unique event id.
+ * Contract:
+ * - authenticate first, always in constant time;
+ * - validate the envelope;
+ * - persist the event durably in `billing_webhook_events`;
+ * - return HTTP 200 only after persistence is confirmed;
+ * - never run financial processing inside the HTTP request.
+ *
+ * Asaas considers only HTTP 200 a successful delivery. HTTP 202 is never used
+ * as an acknowledgement. A persistence failure returns 500 so Asaas retries.
+ * The payload is never trusted as proof of payment: the out-of-band processor
+ * fetches the authoritative resource from Asaas first.
  */
 export async function POST(request: Request): Promise<Response> {
   let expectedToken: string | null;
@@ -96,132 +82,40 @@ export async function POST(request: Request): Promise<Response> {
 
   const event = parsed.event;
 
-  let providerConfigured = false;
+  let admin;
 
   try {
-    providerConfigured = resolveAsaasConfig() !== null;
-  } catch {
-    providerConfigured = false;
+    admin = createSupabaseAdminClient();
+  } catch (error) {
+    reportServerError("billing.webhook.admin", error);
+    return json(503, {
+      received: false,
+      error: error instanceof ConfigurationError ? "configuration_error" : "persistence_failed",
+    });
   }
 
-  if (!providerConfigured) {
-    return json(503, { received: false, error: "provider_not_configured" });
-  }
+  const received = await admin.rpc("billing_receive_webhook_event", {
+    p_provider: "asaas",
+    p_external_event_id: event.eventId,
+    p_event_type: event.eventType,
+    p_resource_type: event.resourceType ?? "",
+    p_resource_id: event.resourceId ?? "",
+    p_payload: event.payload as Json,
+  });
 
-  const admin = createSupabaseAdminClient();
-
-  const inserted = await admin
-    .from("billing_webhook_events")
-    .insert({
-      provider: "asaas",
-      external_event_id: event.eventId,
-      event_type: event.eventType,
-      resource_type: event.resourceType,
-      resource_id: event.resourceId,
-      payload: event.payload as Json,
-      status: "received",
-    })
-    .select("id, status, attempts")
-    .maybeSingle();
-
-  if (inserted.error && inserted.error.code !== "23505") {
-    reportServerError("billing.webhook.persist", inserted.error);
+  if (received.error) {
+    reportServerError("billing.webhook.persist", received.error);
     return json(500, { received: false, error: "persistence_failed" });
   }
 
-  let inbox = inserted.data;
+  const record =
+    received.data && typeof received.data === "object" && !Array.isArray(received.data)
+      ? (received.data as Record<string, unknown>)
+      : {};
 
-  if (!inbox) {
-    const existing = await admin
-      .from("billing_webhook_events")
-      .select("id, status, attempts")
-      .eq("provider", "asaas")
-      .eq("external_event_id", event.eventId)
-      .maybeSingle();
-
-    if (existing.error || !existing.data) {
-      reportServerError("billing.webhook.duplicate", existing.error);
-      return json(500, { received: false, error: "persistence_failed" });
-    }
-
-    inbox = existing.data;
-  }
-
-  if (inbox.status === "processed" || inbox.status === "ignored") {
-    return json(200, { received: true, duplicate: true, status: inbox.status });
-  }
-
-  const claimed = await admin
-    .from("billing_webhook_events")
-    .update({ status: "processing", attempts: inbox.attempts + 1 })
-    .eq("id", inbox.id)
-    .in("status", ["received", "failed"])
-    .select("id")
-    .maybeSingle();
-
-  if (claimed.error) {
-    reportServerError("billing.webhook.claim", claimed.error);
-    return json(500, { received: false, error: "processing_failed" });
-  }
-
-  if (!claimed.data) {
-    const current = await admin
-      .from("billing_webhook_events")
-      .select("status")
-      .eq("id", inbox.id)
-      .maybeSingle();
-
-    if (current.data?.status === "processed" || current.data?.status === "ignored") {
-      return json(200, { received: true, duplicate: true, status: current.data.status });
-    }
-
-    // Another delivery is already processing this event. Acknowledge so Asaas
-    // does not hammer the endpoint; the durable inbox keeps the record.
-    return json(202, { received: true, status: "processing" });
-  }
-
-  if (!isSupportedEvent(event.eventType)) {
-    await admin
-      .from("billing_webhook_events")
-      .update({
-        status: "ignored",
-        last_error: "unsupported_event",
-        processed_at: new Date().toISOString(),
-      })
-      .eq("id", inbox.id);
-
-    return json(200, { received: true, status: "ignored" });
-  }
-
-  try {
-    const client = createAsaasClient();
-    const result = await processAsaasWebhookEvent(admin, client, event);
-
-    await admin
-      .from("billing_webhook_events")
-      .update({
-        status: result.outcome,
-        last_error: result.outcome === "ignored" ? result.detail.slice(0, 1000) : null,
-        processed_at: new Date().toISOString(),
-      })
-      .eq("id", inbox.id);
-
-    return json(200, { received: true, status: result.outcome });
-  } catch (error) {
-    const reason = safeError(error);
-    reportServerError("billing.webhook.process", error);
-
-    await admin
-      .from("billing_webhook_events")
-      .update({
-        status: "failed",
-        last_error: reason.slice(0, 1000),
-        processed_at: null,
-      })
-      .eq("id", inbox.id);
-
-    // Non-2xx makes Asaas redeliver the same event id. The inbox row remains
-    // failed and can also be retried by the reconciliation command.
-    return json(500, { received: false, error: "processing_failed" });
-  }
+  return json(200, {
+    received: true,
+    duplicate: record.duplicate === true,
+    status: typeof record.status === "string" ? record.status : "received",
+  });
 }
