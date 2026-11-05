@@ -49,7 +49,21 @@ function billingType(value: string): string | null {
 }
 
 function errorCode(error: unknown): string {
-  return error instanceof Error ? error.message.split("|")[0] : "unknown";
+  // Supabase/PostgREST errors are plain objects with a `message`, not Error
+  // instances. Losing that message would classify every RPC failure as
+  // `unknown` and mask permanent financial divergences as retryable.
+  const message =
+    error instanceof Error
+      ? error.message
+      : error && typeof error === "object" && "message" in error
+        ? (error as { message: unknown }).message
+        : null;
+
+  if (typeof message !== "string") {
+    return "unknown";
+  }
+
+  return message.split("|")[0].trim() || "unknown";
 }
 
 /**

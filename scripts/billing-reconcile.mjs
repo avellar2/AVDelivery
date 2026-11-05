@@ -53,6 +53,64 @@ const supabase = createClient(supabaseUrl, serviceRoleKey, {
 });
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const appliedPaymentIds = new Set();
+let jobRunId = null;
+let reconciled = 0;
+let skipped = 0;
+let divergences = 0;
+let errors = 0;
+let orphanPaymentIds = [];
+let candidateCount = 0;
+
+const FINANCIAL_DIVERGENCES = [
+  "amount_mismatch",
+  "currency_mismatch",
+  "external_customer_mismatch",
+  "invalid_payment_status",
+];
+
+async function startJobRun() {
+  if (DRY_RUN) return;
+
+  const { data, error } = await supabase
+    .from("billing_job_runs")
+    .insert({ job_name: "reconciliation", status: "running" })
+    .select("id")
+    .single();
+
+  if (error) {
+    console.warn(`[billing:reconcile] job run não registrado: ${error.message.split("|")[0]}`);
+    return;
+  }
+
+  jobRunId = data?.id ?? null;
+}
+
+async function finishJobRun(status) {
+  if (!jobRunId) return;
+
+  const { error } = await supabase
+    .from("billing_job_runs")
+    .update({
+      status,
+      finished_at: new Date().toISOString(),
+      reconciled,
+      divergences,
+      errors,
+      error: errors > 0 ? "reconciliation_errors" : null,
+      metadata: {
+        candidates: candidateCount,
+        orphans: orphanPaymentIds.length,
+        orphanPaymentIds: orphanPaymentIds.slice(0, 25),
+        dryRun: DRY_RUN,
+      },
+    })
+    .eq("id", jobRunId);
+
+  if (error) {
+    console.warn(`[billing:reconcile] job run não finalizado: ${error.message.split("|")[0]}`);
+  }
+}
 
 async function asaas(path, attempt = 0) {
   let response;
@@ -156,15 +214,18 @@ function billingType(value) {
   return ["PIX", "BOLETO", "CREDIT_CARD", "UNDEFINED"].includes(normalized) ? normalized : null;
 }
 
-async function applyPayment(subscription, payment) {
-  if (payment.subscription !== subscription.id) return "skipped";
+async function applyPayment(payment) {
+  if (!payment.subscription) return "skipped";
   if (!payment.customer) return "skipped";
+  if (appliedPaymentIds.has(payment.id)) return "skipped";
 
   const status = canonicalStatus(payment);
   if (!status) return "skipped";
 
   const amountCents = Math.round(Number(payment.value) * 100);
   if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return "skipped";
+
+  appliedPaymentIds.add(payment.id);
 
   if (DRY_RUN) return "would_apply";
 
@@ -173,7 +234,7 @@ async function applyPayment(subscription, payment) {
     p_event_id: null,
     p_event_type: "RECONCILIATION",
     p_payment_id: payment.id,
-    p_external_subscription_id: subscription.id,
+    p_external_subscription_id: payment.subscription,
     p_external_customer_id: payment.customer,
     p_external_status: status,
     p_amount_cents: amountCents,
@@ -188,7 +249,15 @@ async function applyPayment(subscription, payment) {
   });
 
   if (error) {
-    throw new Error(`RPC billing_apply_payment_event falhou: ${error.message.split("|")[0]}`);
+    const reason = error.message.split("|")[0];
+
+    if (FINANCIAL_DIVERGENCES.some((divergence) => reason.includes(divergence))) {
+      divergences += 1;
+      console.error(`[billing:reconcile] divergência ${payment.id}: ${reason}`);
+      return "divergence";
+    }
+
+    throw new Error(`RPC billing_apply_payment_event falhou: ${reason}`);
   }
 
   return status === "CONFIRMED" ? "paid_applied" : "state_applied";
@@ -207,22 +276,26 @@ async function reconcileSubscription(row) {
 
   let paid = 0;
   let states = 0;
-  let skipped = 0;
+  let localSkipped = 0;
 
   for (const payment of scoped) {
     try {
-      const result = await applyPayment(subscription, payment);
+      const result = await applyPayment(payment);
 
       if (result === "paid_applied") paid += 1;
       else if (result === "state_applied" || result === "would_apply") states += 1;
-      else skipped += 1;
+      else localSkipped += 1;
     } catch (error) {
+      errors += 1;
       console.error(
         `[billing:reconcile] loja ${row.store_id}: ${error instanceof Error ? error.message : "erro"}`,
       );
       process.exitCode = 1;
     }
   }
+
+  skipped += localSkipped;
+  reconciled += paid + states;
 
   if (!DRY_RUN) {
     const { error } = await supabase.rpc("billing_update_external_subscription_status", {
@@ -237,37 +310,116 @@ async function reconcileSubscription(row) {
     }
   }
 
-  return { paid, states, skipped, seen: scoped.length, status: subscription.status };
+  return { paid, states, skipped: localSkipped, seen: scoped.length, status: subscription.status };
+}
+
+/**
+ * Compares the provider's most recent payments with local subscriptions.
+ *
+ * Payments for a known subscription are applied through the same idempotent
+ * RPC, which recovers a confirmation whose webhook was lost. Payments for an
+ * unknown subscription are reported as orphan external charges and never
+ * attached to a store automatically.
+ */
+async function scanRecentPayments() {
+  if (DRY_RUN) return;
+
+  let payments;
+
+  try {
+    payments = await asaas("/payments?limit=100&offset=0");
+  } catch (error) {
+    errors += 1;
+    console.error(
+      `[billing:reconcile] varredura de pagamentos: ${error instanceof Error ? error.message : "erro"}`,
+    );
+    return;
+  }
+
+  const recent = payments.data || [];
+  const externalIds = [
+    ...new Set(
+      recent
+        .map((payment) => payment.subscription)
+        .filter((value) => typeof value === "string" && value.length > 0),
+    ),
+  ];
+
+  if (externalIds.length === 0) return;
+
+  const { data: local, error } = await supabase
+    .from("subscriptions")
+    .select("external_subscription_id")
+    .in("external_subscription_id", externalIds);
+
+  if (error) {
+    errors += 1;
+    console.error(`[billing:reconcile] assinaturas locais: ${error.message.split("|")[0]}`);
+    return;
+  }
+
+  const known = new Set(
+    (local || [])
+      .map((row) => row.external_subscription_id)
+      .filter((value) => typeof value === "string" && value.length > 0),
+  );
+
+  orphanPaymentIds = externalIds.filter((id) => !known.has(id));
+
+  for (const payment of recent) {
+    if (!payment.subscription || !known.has(payment.subscription)) continue;
+    if (appliedPaymentIds.has(payment.id)) continue;
+
+    try {
+      const result = await applyPayment(payment);
+
+      if (result === "paid_applied" || result === "state_applied") reconciled += 1;
+      else if (result === "skipped" || result === "would_apply") skipped += 1;
+    } catch (error) {
+      errors += 1;
+      console.error(
+        `[billing:reconcile] pagamento recente ${payment.id}: ${
+          error instanceof Error ? error.message : "erro"
+        }`,
+      );
+      process.exitCode = 1;
+    }
+  }
+
+  if (orphanPaymentIds.length > 0) {
+    console.warn(
+      `[billing:reconcile] ${orphanPaymentIds.length} assinatura(s) externa(s) sem vínculo local; revisão manual necessária.`,
+    );
+  }
 }
 
 async function main() {
+  await startJobRun();
+
   const { data: candidates, error } = await supabase.rpc("billing_reconciliation_candidates", {
     p_limit: LIMIT,
   });
 
   if (error) {
+    errors += 1;
+    await finishJobRun("failed");
     fail(`Não foi possível listar candidatos: ${error.message.split("|")[0]}`);
   }
 
   const rows = candidates || [];
+  candidateCount = rows.length;
   console.log(
     `[billing:reconcile] ${DRY_RUN ? "simulação" : "execução"}: ${rows.length} assinatura(s), limite ${LIMIT}.`,
   );
 
-  let totalPaid = 0;
-  let totalStates = 0;
-  let totalSkipped = 0;
-
   for (const row of rows) {
     try {
       const result = await reconcileSubscription(row);
-      totalPaid += result.paid;
-      totalStates += result.states;
-      totalSkipped += result.skipped;
       console.log(
         `[billing:reconcile] loja ${row.store_id}: ${result.seen} cobrança(s), ${result.paid} paga(s), ${result.states} estado(s), ${result.skipped} ignorada(s), status ${result.status}.`,
       );
     } catch (error) {
+      errors += 1;
       process.exitCode = 1;
       console.error(
         `[billing:reconcile] loja ${row.store_id}: ${error instanceof Error ? error.message : "erro"}`,
@@ -277,11 +429,24 @@ async function main() {
     await sleep(150);
   }
 
+  await scanRecentPayments();
+
+  let status = "succeeded";
+
+  if (errors > 0) {
+    status = reconciled > 0 ? "partial" : "failed";
+  } else if (divergences > 0 || orphanPaymentIds.length > 0) {
+    status = "partial";
+  }
+
+  await finishJobRun(status);
+
   console.log(
-    `[billing:reconcile] concluído: ${totalPaid} pagamento(s) confirmado(s), ${totalStates} estado(s) atualizado(s), ${totalSkipped} ignorado(s).`,
+    `[billing:reconcile] concluído (${status}): ${reconciled} pagamento(s)/estado(s) aplicado(s), ${skipped} ignorado(s), ${divergences} divergência(s), ${errors} erro(s), ${orphanPaymentIds.length} assinatura(s) externa(s) órfã(s).`,
   );
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
+  await finishJobRun("failed");
   fail(error instanceof Error ? error.message : "erro inesperado");
 });

@@ -229,6 +229,27 @@ export class AsaasClientCore {
     return toPayment(result);
   }
 
+  /**
+   * Lists recent payments across the sandbox account. Used by reconciliation
+   * to find confirmed payments whose webhook never arrived and external
+   * charges that are not linked to any known local subscription.
+   */
+  async listRecentPayments(
+    options: { limit?: number; offset?: number } = {},
+  ): Promise<AsaasPayment[]> {
+    const result = await this.http.request({
+      method: "GET",
+      path: "/payments",
+      query: {
+        limit: Math.min(100, Math.max(1, options.limit ?? 100)),
+        offset: Math.max(0, options.offset ?? 0),
+      },
+      schema: asaasPaymentListSchema,
+    });
+
+    return result.data.map(toPayment);
+  }
+
   async getPixQrCode(paymentId: string): Promise<AsaasPixQrCode | null> {
     try {
       const result = await this.http.request({
