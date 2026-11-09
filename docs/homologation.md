@@ -4,8 +4,21 @@
 
 **Etapas 1 e 2 homologadas em 2026-10-29; Etapas 3 e 4 homologadas em 2026-10-30; Etapa 5 com
 homologação parcial em 2026-10-31; Etapa 6A implementada e validada em 2026-11-04; Etapa 6B
-HOMOLOGADA NO ASAAS SANDBOX em 2026-11-04**, com um item de endurecimento não bloqueante pendente
-(proteção de senhas vazadas, configuração manual no painel).
+HOMOLOGADA NO ASAAS SANDBOX em 2026-11-04; Etapa 7A com homologação parcial em 2026-11-05**, com um
+item de endurecimento não bloqueante pendente (proteção de senhas vazadas, configuração manual no
+painel). A 7A implementou e exercitou inbox durável, leases, retry, dead letter, worker e
+conciliação automática, mas o cron não foi ativado em ambiente publicado com URL estável.
+
+A **Etapa 7A.1**, executada em 2026-11-05, publicou o aplicativo em HTTPS por túnel autorizado, ligou
+o agendador (worker a cada minuto, conciliação a cada 15 minutos) e comprovou entrega externa real do
+Asaas Sandbox, processamento automático, concorrência, recuperação de lease e de backlog. Permanece
+**parcial** porque a URL do túnel é efêmera e não existe alerta externo configurado.
+
+A **Etapa 7A.2**, também em 2026-11-05, entregou a rota `/api/internal/billing/health` para monitor
+externo (JSON sem PII, `503` em estado crítico, `401` sem segredo), comprovou o `503` com o agendador
+parado e a recuperação automática ao religá-lo, e levantou os preços das opções reais de hospedagem.
+Continua **parcial e bloqueada**: contratar a hospedagem estável custa cerca de US$ 20/mês e depende
+de autorização; até lá tudo roda no computador do usuário, atrás de túnel efêmero.
 
 As Etapas 3, 4 e 5 foram validadas contra o projeto Supabase real de homologação, com migrações
 aplicadas, integração, E2E e revisão visual em desktop e mobile. Na Etapa 5, o GPS web em primeiro
@@ -1031,7 +1044,8 @@ Sandbox), sem cartão e sem dinheiro real.
 
 1. Produção — bloqueada por trava Sandbox-only; revisão deliberada antes de qualquer ativação.
 2. Cartão de crédito, nota fiscal, split e retenção automática.
-3. Worker/fila/agendador: a conciliação continua manual e reenviável.
+3. Worker/fila/agendador: a conciliação continua manual e reenviável. _(Superado pela Etapa 7A, que
+   adicionou processador, leases e conciliação automática; ver a seção da Etapa 7A.)_
 4. O endpoint público de homologação era um túnel efêmero (`trycloudflare.com`), já encerrado; um
    deploy real precisa de URL estável.
 
@@ -1066,7 +1080,8 @@ link/Pix da cobrança, estado da assinatura e “Verificar pagamento”. Nenhum 
 
 ### Pendências e limitações
 
-- Sem worker/fila/agendador; conciliação manual.
+- Sem worker/fila/agendador; conciliação manual. _(Superado pela Etapa 7A; o cron segue dependente de
+  configuração em ambiente publicado.)_
 - Sem cartão, nota fiscal, split, retenção automática ou notificações de cobrança.
 - Trava Sandbox-only precisa de revisão deliberada antes de produção.
 - Endpoint público de homologação era um túnel efêmero; produção exige URL estável.
@@ -1091,3 +1106,327 @@ link/Pix da cobrança, estado da assinatura e “Verificar pagamento”. Nenhum 
 cobrança Pix real de Sandbox, confirmação simulada pelo provedor, webhook autenticado e liberação
 transacional da loja, com duplicidade, reenvio e conciliação comprovados. A produção não foi
 alterada e continua bloqueada pela trava Sandbox-only.
+
+## Homologação da Etapa 7A — Hardening financeiro, webhooks e resiliência (2026-11-05)
+
+### Status
+
+**HOMOLOGAÇÃO PARCIAL.** A inbox durável, o ACK `200`, o processador fora do ciclo HTTP, os leases, a
+recuperação de processo morto, o retry com backoff, o dead letter, a conciliação automática e o
+diagnóstico de saúde foram implementados e exercitados contra o projeto Supabase de homologação
+(`jtryfpaxocdiqrehptlz`). O cron **não foi ativado** em um ambiente publicado com URL HTTPS estável,
+portanto não há evidência de execução contínua agendada. Nenhum banco de produção foi acessado,
+nenhum `reset` remoto foi executado, nenhuma migração já aplicada foi editada e nenhum valor real foi
+movimentado.
+
+### Migração aplicada
+
+- `20261105120000_billing_reliability.sql` — status `dead_letter`, colunas de retry/lease, tabela
+  `billing_job_runs`, RPCs de recebimento/reivindicação/recuperação/conclusão/falha e
+  `admin_get_billing_health`.
+
+Aplicada com `supabase db push --linked`, sem `reset`. O histórico remoto passou a ter **27
+migrações**, e as 26 anteriores permaneceram intocadas.
+
+### Resultados reais
+
+| Verificação                     | Resultado                                                          |
+| ------------------------------- | ------------------------------------------------------------------ |
+| `npm run typecheck`             | OK                                                                 |
+| `npm run lint`                  | OK                                                                 |
+| `npx vitest run --maxWorkers=2` | **352/352** testes, **34 arquivos**                                |
+| `npm run test:e2e`              | **17/17**                                                          |
+| `npm run build`                 | OK, incluindo as rotas internas e `/admin/billing`                 |
+| Integração real da 7A           | **10/10** (`tests/integration/billing-reliability.test.ts`)        |
+| Worker real contra a inbox      | recuperou leases, processou lote e registrou `billing_job_runs`    |
+| Conciliação real                | `succeeded`, 2 assinaturas, 4 pagamentos aplicados, 0 divergências |
+
+Testes unitários novos: rota de webhook (8), worker (18), autenticação das rotas internas (7) e
+classificação de erro PostgREST na conciliação (2).
+
+### O que foi comprovado contra o banco real
+
+- **ACK correto:** evento válido é persistido e recebe `200`; duplicata também `200`; falha de RPC
+  retorna `500`; token inválido `401`; JSON/estrutura inválidos `400`; corpo acima de 256 KiB `413`.
+  Nenhuma resposta `202` é usada como confirmação.
+- **Persistência sem processamento financeiro:** a rota não consulta o Asaas nem chama a RPC de
+  pagamento. O teste confirma os argumentos exatos da RPC de recebimento e a ausência de efeitos
+  comerciais.
+- **Deduplicação:** a mesma entrega devolve o evento original, preserva o payload e não rebaixa
+  estado terminal.
+- **Concorrência:** duas reivindicações simultâneas não recebem o mesmo evento.
+- **Lease:** conclusão/falha com token divergente é recusada; conclusão repetida é idempotente;
+  `processed`/`ignored`/`dead_letter` não são sobrescritos.
+- **Retry:** falha transitória volta para `failed` com `next_attempt_at` futuro e pode ser
+  reivindicada novamente.
+- **Dead letter:** falha permanente e tentativas esgotadas viram `dead_letter` com motivo e
+  `dead_lettered_at`; não há retry infinito.
+- **Recuperação de processo morto:** uma linha `processing` com lease expirado é recuperada; se já
+  esgotou as tentativas, vira `dead_letter`; se não, volta a `failed`. Um teste sintético recuperou 1
+  evento, reivindicou-o e o reprocessou com `provider_payment_not_found`, deixando a linha em
+  `failed`, `attempts = 2` e lease nulo; a linha sintética foi removida ao final.
+- **Permissões:** RPCs de serviço são negadas a `authenticated`; `billing_job_runs` é acessível
+  apenas por `service_role`; `admin_get_billing_health` exige superadministrador e não devolve
+  payload, documento, token ou PII.
+- **Nenhuma loja ou dado anterior foi removido.** A suíte cria e apaga seus próprios eventos, usuários
+  e execuções; o backlog pré-existente teve apenas o agendamento deslocado durante o teste e foi
+  restaurado no `afterAll`.
+
+### Execução real do worker e da conciliação
+
+- Primeira execução do worker: 8 eventos históricos `failed` foram reivindicados. A classificação
+  inicial tratava erros PostgREST como `unknown` e os mantinha em retry; o código foi corrigido para
+  ler `message` de objetos que não são `Error`.
+- Após a correção, os 8 eventos foram para `dead_letter` com
+  `attempts_exhausted:external_subscription_unknown`. São artefatos de testes antigos da Etapa 6B
+  (assinaturas externas simuladas que nunca existiram no Sandbox), não cobranças de clientes. O
+  diagnóstico `/admin/billing` passa a exibi-los como revisão manual; **não foram apagados**.
+- A conciliação real terminou `succeeded`: 2 candidatas, 2 assinaturas sincronizadas, 4 pagamentos
+  aplicados, 0 ignorados, 0 divergências, 0 erros e 0 cobranças órfãs.
+- A rota de worker e a de conciliação responderam `200` com o segredo configurado e `503`/`401` sem
+  segredo válido.
+
+### O que não foi comprovado
+
+- **Cron ativo:** o `vercel.json` declara as cadências, mas não houve deploy nem ativação em ambiente
+  com URL estável. Não há evidência de execução contínua por minuto/15 minutos.
+- **Webhook externo novo apontando para o worker:** o túnel da Etapa 6B foi encerrado. O recebimento
+  foi validado por testes de rota e a inbox por execuções reais, mas não houve uma entrega externa do
+  Asaas percorrendo recebimento → worker → liberação nesta etapa.
+- **Alerta externo:** a tela `/admin/billing` é o diagnóstico; não há envio de e-mail/Slack nem
+  integração com APM.
+- **Reprocessamento de dead letter pela UI:** é deliberadamente manual; não há botão nem retry
+  automático de falha permanente.
+- **Produção:** fora do escopo e bloqueada pela trava Sandbox-only.
+
+### Correções durante a implementação
+
+- **Erro PostgREST classificado como `unknown`:** `reconcile-core.ts` usava `instanceof Error`, mas os
+  erros do Supabase são objetos simples com `message`. O motivo (`amount_mismatch`,
+  `external_subscription_unknown` etc.) era perdido e divergências permanentes pareciam transitórias.
+  Corrigido e coberto por testes unitários.
+- **Backoff em tentativa esgotada:** o worker calculava atraso mesmo quando o evento já iria para
+  `dead_letter`; passou a usar `delaySeconds = 0` e `retryable = false` nesse caso.
+- **Variável de ambiente vazia:** as rotas internas tratavam `BILLING_*=` como `0`; passaram a usar o
+  fallback quando o valor é vazio ou não numérico.
+- **Duplicidade de contagem na conciliação:** a varredura de pagamentos recentes passou a usar
+  `appliedPaymentIds` e contadores locais, evitando somar o mesmo pagamento duas vezes.
+
+### Critérios de aceite da Etapa 7A
+
+- [x] Webhook responde `200` somente após persistência; `202` eliminado; falha de persistência `500`.
+- [x] Nenhum processamento financeiro dentro da requisição HTTP.
+- [x] Inbox durável com lease, retry, backoff, limite de tentativas e dead letter.
+- [x] Recuperação de eventos presos em `processing` após crash.
+- [x] Concorrência sem processamento duplicado.
+- [x] Worker e conciliação automática executáveis por rota protegida.
+- [x] Conciliação recupera pagamentos recentes e sinaliza cobranças órfãs.
+- [x] Diagnóstico de saúde sem payload/PII, restrito a superadministrador.
+- [x] Token do webhook alinhado a 32–255 caracteres.
+- [x] Suítes anteriores preservadas: 352 testes Vitest e 17 E2E verdes.
+- [ ] Cron ativo em ambiente publicado com URL estável, com evidência de execução contínua.
+- [ ] Alerta externo de falha/dead letter/divergência.
+- [ ] Entrega externa real do Asaas percorrendo recebimento → worker após a mudança.
+
+**Conclusão: ETAPA 7A COM HOMOLOGAÇÃO PARCIAL.** O núcleo de resiliência funciona contra o banco de
+homologação e as invariantes financeiras foram exercitadas, mas sem agendador ativo em ambiente
+publicado não é honesto declarar a etapa totalmente homologada.
+
+### Reprodução da Etapa 7A
+
+```powershell
+npm run typecheck
+npm run lint
+npm run format:check
+npx vitest run --maxWorkers=2
+npm run test:e2e
+npm run build
+npx supabase db lint --linked
+```
+
+Com o servidor local e o segredo configurado:
+
+```powershell
+curl -H "Authorization: Bearer $env:BILLING_WORKER_SECRET" http://localhost:3000/api/internal/billing/worker
+curl -H "Authorization: Bearer $env:BILLING_WORKER_SECRET" http://localhost:3000/api/internal/billing/reconcile
+```
+
+Nunca aponte `SUPABASE_TEST_*` para produção: a suíte cria e remove usuários, eventos e execuções.
+Ativação em ambiente real e cron exigem revisão deliberada; ver
+[billing-scheduler.md](billing-scheduler.md).
+
+## Homologação operacional da Etapa 7A.1 (2026-11-05)
+
+Objetivo: provar que o faturamento funciona **sem intervenção humana** — agendador chamando o worker
+e a conciliação, entrega externa real do Asaas e recuperação automática de falhas.
+
+**Status: HOMOLOGAÇÃO OPERACIONAL PARCIAL.** O ciclo automático foi comprovado em ambiente publicado
+por HTTPS, mas a URL é de túnel efêmero e não há alerta externo. Nenhuma cobrança real, nenhum
+acesso a produção e nenhum deploy financeiro.
+
+### Ambiente usado
+
+| Item             | Valor                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------- |
+| Aplicação        | `next start` local, porta 3000, build de produção                                                             |
+| Exposição        | túnel HTTPS autorizado (cloudflared quick tunnel)                                                             |
+| Endpoint público | `https://<aleatorio>.trycloudflare.com` (efêmero, encerrado ao fim da sessão)                                 |
+| Agendador        | `npm run billing:schedule` (novo script deste repositório)                                                    |
+| Cadência         | worker 60 s, conciliação 900 s                                                                                |
+| Segredo          | `BILLING_WORKER_SECRET` de 43 caracteres, só em `.env.local` (ignorado)                                       |
+| Webhook          | mesmo registro da 6B reapontado para o túnel, `enabled`, `interrupted: false`, 16 eventos, `NON_SEQUENTIALLY` |
+
+Não há Vercel, Supabase Cron/pg_net nem outro agendador contratado: `pg_cron`/`pg_net` continuam
+desabilitados no projeto e, sem endpoint público estável, ativá-los não teria efeito prático.
+
+### Evidências
+
+| Verificação                                                                | Resultado                                                                                                                              |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Reativação do webhook reenviou a fila do Asaas                             | 3 eventos externos recebidos às 16:44:01–02 UTC, `attempts: 0`, processados só às 16:44:44–46                                          |
+| Novo evento real (pagamento simulado em Sandbox às 16:47:05)               | webhook recebido 16:47:07 com `attempts: 0`; processado pelo worker agendado às 16:47:35, sem chamada manual                           |
+| Efeito financeiro do pagamento                                             | fatura `paid` com `paid_at` do provedor, assinatura `active`, loja `active` e `hasAccess: true`                                        |
+| Reenvio do mesmo evento (2×)                                               | `200 {"duplicate":true}` nas duas vezes; fatura e período inalterados                                                                  |
+| Token inválido no webhook                                                  | `401 invalid_token`                                                                                                                    |
+| Duas execuções concorrentes do worker                                      | chamada A reivindicou 2 eventos, chamada B reivindicou 0; cada evento processado uma única vez                                         |
+| Evento fora de ordem (`PAYMENT_CREATED` reenviado após `PAYMENT_RECEIVED`) | fatura permaneceu `paid`, mesmo `paid_at` e mesmo período                                                                              |
+| Lease expirado de worker "morto"                                           | evento em `processing` com lease vencido voltou ao fluxo, foi reprocessado (`attempts: 2`) e o lease foi limpo                         |
+| Backlog detectado                                                          | com o agendador parado, `/admin/billing` exibiu "pendentes há mais de 5 minutos" e "processador não executa há mais de 10 minutos"     |
+| Recuperação automática                                                     | ao religar o agendador, o evento de 16:51:03 foi processado às 17:02:34 e os alertas de backlog/worker desapareceram                   |
+| Falha transitória do provedor                                              | evento apontando para pagamento inexistente ficou `failed` com `provider_payment_not_found`, `next_attempt_at` no futuro e lease limpo |
+| Cadência real observada                                                    | 15 execuções do worker em ~15 min (intervalo efetivo de ~61 s) e conciliação às 17:07:07 e 17:22:15 UTC                                |
+| Execuções de conciliação                                                   | `succeeded` com 4 pagamentos reconciliados, 0 divergências e 0 erros                                                                   |
+| Rotas internas publicamente expostas                                       | `401` sem segredo e com segredo fora da faixa; nunca `200`                                                                             |
+
+### Os 8 eventos em dead letter
+
+Todos foram gerados em 2026-11-04 entre 17:50 e 17:54, com `attempts: 8` e
+`last_error = attempts_exhausted:external_subscription_unknown`. A consulta ao Asaas Sandbox
+identificou a origem:
+
+| Recurso                | Situação no provedor                                  | Vínculo              |
+| ---------------------- | ----------------------------------------------------- | -------------------- |
+| `sub_gfe01aulya6o4tdu` | `deleted: true`, `externalReference: probe-pix-check` | sondagem da 6B       |
+| `sub_knctzveer5zak8ti` | `deleted: true`, `externalReference: probe-pix-today` | sondagem da 6B       |
+| `pay_vg8ejrd3zh1rocen` | `deleted: true`, `PENDING`, R$ 59,90                  | filho da 1ª sondagem |
+| `pay_i57f3dzq7c0j7mc7` | `deleted: true`, `PENDING`, R$ 59,90                  | filho da 2ª sondagem |
+
+Os dois eventos `SUBSCRIPTION_CREATED`, dois `SUBSCRIPTION_DELETED`, dois `PAYMENT_CREATED` e dois
+`PAYMENT_DELETED` descrevem exatamente o ciclo de vida dessas duas sondagens, que nunca foram
+vinculadas a `subscriptions.external_subscription_id`. **Classificação: esperado.** Não houve
+impacto financeiro, nenhum evento foi apagado e nenhum foi reprocessado automaticamente.
+
+### O que continua pendente
+
+- [ ] URL HTTPS **estável** (Vercel, domínio próprio ou túnel nomeado) com o agendador em execução
+      contínua e monitorada.
+- [ ] Alerta externo (e-mail, Slack, APM) para dead letter, worker parado e divergência de
+      conciliação. Não há serviço autorizado disponível; o script apenas imprime `ALERTA` no log.
+- [ ] Reprocessamento administrativo de dead letter pela interface.
+- [ ] Rotação do `ASAAS_WEBHOOK_TOKEN` e do `BILLING_WORKER_SECRET` antes de qualquer uso real.
+
+**Conclusão: ETAPA 7A COM HOMOLOGAÇÃO OPERACIONAL PARCIAL.** O faturamento automático foi
+comprovado de ponta a ponta em ambiente publicado por HTTPS, com processamento fora do ciclo HTTP,
+idempotência, concorrência segura e recuperação de falhas. A etapa não é declarada completa porque a
+publicação é temporária e não existe alerta externo.
+
+### Reprodução da Etapa 7A.1
+
+```powershell
+npm run build
+npm run start                     # porta 3000
+# em outro terminal, publique a porta 3000 em HTTPS (cloudflared, Vercel ou equivalente)
+npm run billing:schedule -- --base-url https://SEU-DOMINIO
+```
+
+O script `scripts/billing-scheduler.mjs` exige `BILLING_WORKER_SECRET` (ou `CRON_SECRET`) com 32 a
+255 caracteres e só aceita HTTPS fora de localhost.
+
+## Etapa 7A.2 — hospedagem estável, agendamento permanente e alertas (2026-11-05)
+
+Objetivo: eliminar a dependência do computador do usuário e do túnel efêmero, obter HTTPS estável,
+agendamento permanente e monitoramento de falhas com alerta externo.
+
+**Status: PARCIAL — bloqueada por autorização de contratação.** Nenhum serviço foi contratado, nenhum
+domínio foi comprado e nenhum custo recorrente foi assumido. O que não dependia de autorização foi
+entregue e validado: a rota de saúde para monitor externo, o levantamento verificado de preços e a
+validação completa (typecheck, lint, format, 368 testes unitários, 17 E2E, build, migrações e
+advisors).
+
+### Auditoria de infraestrutura e segredos
+
+| Verificação                                                             | Resultado                                                                             |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Conta/projeto de hospedagem autorizado                                  | **Não existe.** Sem conta Vercel, sem CLI `vercel`, sem token, sem `gh`               |
+| Credenciais de túnel nomeado (`~/.cloudflared`)                         | Ausentes — só o binário do túnel rápido (efêmero)                                     |
+| Outras plataformas (Netlify, Fly, Railway, Render, AWS, GCP, Azure, DO) | Nenhuma CLI, conta ou variável de ambiente configurada                                |
+| Segredos no repositório                                                 | Nenhum. `.env.local` ignorado; `.env.example` só com nomes                            |
+| Segredos em logs/respostas                                              | Rotas devolvem JSON sanitizado; chamadas de teste nunca imprimiram o valor do segredo |
+| Migrações aplicadas                                                     | 0 novas nesta etapa; nenhum `db reset` remoto                                         |
+
+### Opções de hospedagem comparadas (preços verificados em 2026-11-05)
+
+| Opção                                  | Cron / cadência                                                                  | HTTPS e domínio                                              | Custo                                                                         | Situação                       |
+| -------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------- | ------------------------------ |
+| **Vercel Pro** (recomendada)           | cron por minuto e por projeto (100 jobs); precisão de minuto                     | HTTPS automático; 1 domínio grátis no 1º ano em TLD elegível | **US$ 20/mês** de taxa de plataforma, 1 assento, com US$ 20 de crédito mensal | Requer autorização             |
+| Vercel Hobby                           | **1 execução por dia**, precisão por hora — expressão por minuto falha no deploy | HTTPS em `*.vercel.app`                                      | gratuito                                                                      | Não atende à cadência          |
+| Supabase Cron (`pg_cron` + `pg_net`)   | 1 min / 15 min, sem custo adicional sobre o projeto Supabase                     | **não hospeda** — só chama um endpoint HTTPS externo         | incluído no projeto; segredo no Vault                                         | Só serve combinado com um host |
+| Túnel rápido (cloudflared)             | depende do PC do usuário                                                         | URL aleatória, sem SLA, muda a cada execução                 | gratuito                                                                      | **Não é hospedagem**           |
+| Túnel nomeado (Cloudflare)             | depende de um host rodando                                                       | exige conta Cloudflare + domínio no Cloudflare               | requer conta e domínio; não cotado                                            | Requer autorização             |
+| VPS/cron próprio, Railway, Render, Fly | cadência livre                                                                   | HTTPS/domínio a configurar                                   | não cotado nesta etapa                                                        | Não avaliado                   |
+
+Observações que pesam na recomendação:
+
+- A cobrança é Pix de R$ 59,90/mês por loja; os US$ 20/mês da Vercel Pro são o único custo recorrente
+  novo identificado para tirar a operação do PC do usuário, e a taxa inclui US$ 20 de crédito de uso.
+- O worker a cada minuto custa ~43.200 invocações/mês e a conciliação ~2.880/mês; ambas consomem do
+  crédito incluído, mas o custo de função deve ser conferido em produção.
+- Sem hospedagem estável, ativar `pg_cron`/`pg_net` não resolve: não há URL fixa para chamar.
+- Não foi escolhida a opção mais cara: a comparação ficou restrita ao tier mínimo que atende à
+  cadência de 1 minuto exigida pelo worker.
+
+**Bloqueio exato:** contratar a hospedagem exige conta paga, cartão e custo recorrente de
+aproximadamente US$ 20/mês — decisão que a etapa não pode tomar sozinha. Até a autorização, a
+operação continua dependendo do PC do usuário, o que mantém a homologação **parcial** por definição.
+
+### Entregue nesta etapa: rota de saúde para monitor externo
+
+`src/modules/billing/job-health.ts` + `src/app/api/internal/billing/health/route.ts`:
+
+- `GET`/`POST` protegidos pelo mesmo segredo dedicado das rotas de trabalho (32–255 caracteres,
+  comparação em tempo constante, falha fechada);
+- devolve contadores, carimbos de tempo e o erro sanitizado da última execução — **sem** payload,
+  documento, valor, token ou chave;
+- `200` em `ok`/`warning` (só dead letter), **`503` quando qualquer alerta for crítico**, `401` sem
+  segredo e `503` se o segredo não estiver configurado ou a leitura falhar;
+- alertas: `worker_not_running` (>10 min), `worker_last_failed`, `reconciliation_not_running` (>2 h),
+  `reconciliation_last_failed`, `pending_backlog` (>5 min), `stale_processing`, `dead_letter`;
+- 16 testes unitários novos cobrindo cada regra, a autorização e a falha fechada.
+
+Sem essa rota, um monitor de uptime não teria como detectar que o faturamento parou: `/admin/billing`
+exige sessão de superadministrador e um navegador.
+
+### Evidências da 7A.2 (ambiente da 7A.1 ainda publicado por túnel)
+
+| Verificação                               | Resultado                                                                                       |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Rota de saúde sem credencial (pelo túnel) | `401 {"ok":false,"error":"unauthorized"}`                                                       |
+| Rota de saúde com credencial (pelo túnel) | `200` com `status: "warning"` e `alerts: ["dead_letter"]` (os 8 da 7A.1)                        |
+| Agendador parado por ~15 min              | `503` às 19:53:15 UTC com `status: "critical"` e `alerts: ["dead_letter","worker_not_running"]` |
+| Agendador religado                        | worker executou às 19:54:06 UTC e a rota voltou a `200` em 19:54:30, sem intervenção            |
+| Agendador duplicado                       | duas instâncias do script rodaram juntas sem processamento duplicado (claim atômico)            |
+| Suíte completa                            | typecheck, lint, `format:check`, 368 testes unitários (35 arquivos), 17 E2E, build              |
+| Build                                     | inclui `/api/internal/billing/health` como rota dinâmica                                        |
+
+### O que continua pendente (7A.2)
+
+- [ ] Hospedagem estável autorizada e contratada (Vercel Pro ou equivalente) com deploy por Git.
+- [ ] Cron permanente nessa hospedagem: worker a cada minuto e conciliação a cada 15 minutos.
+- [ ] Monitor externo apontado para `/api/internal/billing/health` com o header `Authorization` e
+      alerta em resposta diferente de `200` (ou em `status != "ok"` para cobrir dead letter).
+- [ ] Rotação dos segredos antes de qualquer uso real.
+
+**Conclusão: ETAPA 7A.2 PARCIAL.** A parte independente de contratação foi concluída e provada
+(rota de saúde, preços verificados, suíte verde), mas **hospedagem estável, cron permanente e alerta
+externo dependem de autorização de custo** e não existem hoje. O ciclo automático continua rodando
+apenas enquanto o PC do usuário estiver ligado e o túnel ativo.

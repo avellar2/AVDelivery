@@ -3,8 +3,9 @@
 Este documento descreve a fundação comercial da **Etapa 6A** e a cobrança recorrente da **Etapa 6B**
 com o Asaas **Sandbox**. A Etapa 6A cobre planos, assinaturas, ciclo de teste/carência/vencimento,
 isenções, auditoria, onboarding e bloqueio de novas vendas. A Etapa 6B adiciona perfil de
-faturamento, cliente/assinatura/cobrança externa, webhook autenticado, conciliação manual e
-tratamento de atraso/estorno/chargeback.
+faturamento, cliente/assinatura/cobrança externa, webhook autenticado, conciliação e tratamento de
+atraso/estorno/chargeback. A **Etapa 7A** acrescenta inbox durável, processamento fora do ciclo HTTP
+e conciliação automática, com cron dependente de configuração no ambiente.
 
 > Status: a Etapa 6B está **homologada no Asaas Sandbox (2026-11-04)**. O ciclo externo real —
 > assinatura Pix mensal de R$ 59,90, cobrança, confirmação simulada pelo provedor, webhook
@@ -175,9 +176,10 @@ Segurança: o owner lê o próprio perfil/checkout, mas não escreve; RPCs de es
 `service_role`; o webhook não confia em `store_id` do payload; o valor é revalidado contra o plano;
 não há armazenamento de cartão/CVV/chave administrativa; nenhuma chave é exibida na interface.
 
-Limitações: sem worker/fila, sem nota fiscal, sem cartão, sem autoatendimento de troca de plano, sem
-job de cobrança e sem produção habilitada. Ver
-[billing-production-limits.md](billing-production-limits.md).
+Limitações: o worker e a conciliação existem, mas dependem de cron externo configurado após o deploy;
+não há nota fiscal, cartão, autoatendimento de troca de plano nem produção habilitada. Ver
+[billing-production-limits.md](billing-production-limits.md) e
+[billing-scheduler.md](billing-scheduler.md).
 
 Documentos relacionados: [asaas-integration.md](asaas-integration.md), [webhooks.md](webhooks.md),
 [billing-idempotency.md](billing-idempotency.md),

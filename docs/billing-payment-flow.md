@@ -82,11 +82,15 @@ status `active` é gravado e nenhum `paid_at` é preenchido.
 
 ### 6. Confirmação pelo provedor
 
-- O Asaas envia webhook autenticado por `asaas-access-token`.
+- O Asaas envia webhook autenticado por `asaas-access-token`; o AVDelivery apenas valida e persiste o
+  evento, respondendo `200` depois da gravação (nunca `202`).
+- O processador protegido reivindica o evento fora do ciclo HTTP sob lease.
 - O AVDelivery consulta o pagamento no provedor e aplica o estado real.
 - Só então a fatura vira `paid`, `paid_at` é gravado, o período é estendido e a assinatura fica
   `active`, liberando novas vendas.
-- A liberação é automática; não depende de ação do superadministrador.
+- A liberação é automática; não depende de ação do superadministrador, mas depende de o worker ser
+  chamado pelo agendador configurado. A conciliação automática também recupera pagamento confirmado
+  cujo webhook se perdeu.
 
 ### 7. Depois da confirmação
 
@@ -104,7 +108,8 @@ status `active` é gravado e nenhum `paid_at` é preenchido.
 3. aplica os pagamentos pelo mesmo RPC idempotente do webhook;
 4. informa quantos foram aplicados/ignorados, sem exibir segredos.
 
-É um complemento de consistência, não uma promessa de processamento assíncrono.
+É um complemento de consistência e uma saída de emergência para o owner; não substitui o worker nem
+o agendador.
 
 ## O que o owner **não** pode fazer
 
@@ -119,16 +124,18 @@ Essas operações são exclusivas de `service_role` e revalidam tudo no banco.
 
 ## Falhas e mensagens
 
-| Situação                        | Comportamento                                             |
-| ------------------------------- | --------------------------------------------------------- |
-| Sem dados de faturamento        | botão bloqueado; mensagem para salvar o perfil            |
-| Sem configuração do Sandbox     | aviso com nomes das variáveis; botão desabilitado         |
-| Assinatura criada, sem cobrança | sucesso parcial, sem link; oferece “Verificar pagamento”  |
-| Credencial recusada             | mensagem de autenticação, sem revelar a chave             |
-| Timeout/rede/limite             | mensagem segura; tentar novamente                         |
-| Valor/moeda divergentes         | checkout/aplicação recusados (`amount/currency_mismatch`) |
-| Webhook inválido                | `401`/`400`; nada é alterado                              |
-| Falha ao processar webhook      | `500`, evento `failed`, reentrega/conciliação             |
+| Situação                         | Comportamento                                             |
+| -------------------------------- | --------------------------------------------------------- |
+| Sem dados de faturamento         | botão bloqueado; mensagem para salvar o perfil            |
+| Sem configuração do Sandbox      | aviso com nomes das variáveis; botão desabilitado         |
+| Assinatura criada, sem cobrança  | sucesso parcial, sem link; oferece “Verificar pagamento”  |
+| Credencial recusada              | mensagem de autenticação, sem revelar a chave             |
+| Timeout/rede/limite              | mensagem segura; tentar novamente                         |
+| Valor/moeda divergentes          | checkout/aplicação recusados (`amount/currency_mismatch`) |
+| Webhook inválido                 | `401`/`400`; nada é alterado                              |
+| Falha de persistência do webhook | `500`; o Asaas reenvia; nada foi processado               |
+| Falha transitória no worker      | evento `failed` com backoff; nova tentativa automática    |
+| Divergência permanente           | evento `dead_letter`; revisão manual, sem retry infinito  |
 
 ## Testes
 

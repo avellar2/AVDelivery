@@ -307,12 +307,24 @@ Detalhes: [subscriptions.md](subscriptions.md).
   continuam exclusivas de `service_role`.
 - `src/modules/billing/reconcile-core.ts` transforma o estado autoritativo do Asaas em chamadas
   idempotentes à RPC, tanto no webhook quanto na conciliação.
-- `POST /api/webhooks/asaas` autentica por `asaas-access-token`, persiste o evento antes de processar,
-  consulta o provedor e só então aplica o estado. O payload nunca é prova de pagamento.
+- `POST /api/webhooks/asaas` autentica por `asaas-access-token`, valida o envelope e persiste o
+  evento de forma durável. Ele **não** consulta o provedor nem aplica estado financeiro na
+  requisição: responde `200` somente após a persistência e nunca usa `202` como ACK.
+- `src/modules/billing/worker.ts` + `inbox-store.ts` processam a inbox fora do ciclo HTTP, com
+  `FOR UPDATE SKIP LOCKED`, lease, backoff com jitter, limite de tentativas e dead letter. A
+  recuperação de leases expirados acontece antes de cada lote.
+- `src/modules/billing/reconcile-runner.ts` executa a conciliação automática pela mesma RPC
+  idempotente, incluindo varredura de pagamentos recentes e detecção de cobranças órfãs.
+- `src/app/api/internal/billing/{worker,reconcile}` são as rotas protegidas por
+  `BILLING_WORKER_SECRET`/`CRON_SECRET`; `src/modules/billing/worker-auth.ts` compara o segredo em
+  tempo constante e falha fechado.
+- `billing_job_runs` registra execuções sanitizadas; `/admin/billing` mostra saúde, alertas e última
+  execução para superadministradores. O agendamento depende de cron externo (Vercel Cron/Supabase
+  Cron); o `vercel.json` declara a cadência, mas não a ativa sozinho.
+- `scripts/billing-reconcile.mjs` continua disponível como recuperação manual reenviável e grava a
+  mesma trilha de execução.
 - O banco concentra as invariantes: valor exato do plano, moeda BRL, cliente/assinatura externos,
-  transições protegidas, período que só avança, `dedupe_key` e auditoria.
-- Não há worker, fila ou agendador. O webhook processa de forma síncrona e
-  `scripts/billing-reconcile.mjs` é a recuperação manual reenviável.
+  transições protegidas, período que só avança, `dedupe_key`, lease e auditoria.
 - A tela `/dashboard/assinatura` mostra perfil, estado externo, link/Pix e aviso explícito de
   Sandbox; não existe botão “Pagar agora” nem coleta de cartão.
 

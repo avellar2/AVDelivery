@@ -1,6 +1,6 @@
-import { createHash, timingSafeEqual } from "node:crypto";
-
 import { z } from "zod";
+
+import { timingSafeTokenMatches } from "@/lib/timing-safe";
 
 export const ASAAS_WEBHOOK_MAX_BYTES = 256 * 1024;
 
@@ -98,14 +98,7 @@ export function webhookTokenMatches(
   providedToken: string | null | undefined,
   expectedToken: string,
 ): boolean {
-  if (!providedToken || !expectedToken) {
-    return false;
-  }
-
-  const provided = createHash("sha256").update(providedToken, "utf8").digest();
-  const expected = createHash("sha256").update(expectedToken, "utf8").digest();
-
-  return timingSafeEqual(provided, expected);
+  return timingSafeTokenMatches(providedToken, expectedToken);
 }
 
 const PAYMENT_EVENTS = new Set([

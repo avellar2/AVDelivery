@@ -5,8 +5,15 @@ Comercialização por assinatura mensal por estabelecimento, sem comissão por p
 
 **Status atual: Etapas 1, 2, 3 e 4 homologadas; Etapa 5 com homologação parcial; Etapas 5B e 5C
 com aplicativo Android validado apenas em emulador; Etapa 6A implementada; Etapa 6B homologada no
-Asaas Sandbox (2026-11-04, produção não ativada)** em projeto Supabase exclusivo de testes
-(2026-10-29 a 2026-11-04).
+Asaas Sandbox (2026-11-04); Etapa 7A com homologação operacional parcial (2026-11-05), com produção
+não ativada** em projeto Supabase exclusivo de testes (2026-10-29 a 2026-11-05).
+
+A Etapa 7A.1 publicou o aplicativo por HTTPS, ligou o agendador (worker a cada minuto, conciliação a
+cada 15 minutos) e comprovou entrega externa real do Asaas Sandbox, processamento automático,
+duplicidade idempotente, concorrência e recuperação de lease e de backlog. A Etapa 7A.2 acrescentou
+uma rota de saúde sem PII para monitor externo e comparou as opções reais de hospedagem estável; a
+etapa continua parcial porque a URL usada foi um túnel efêmero, não há hospedagem autorizada
+contratada e nenhum canal de alerta externo está configurado.
 
 A plataforma entrega autenticação, isolamento multiempresa por RLS, painel do estabelecimento,
 superadministrador, cardápio digital com categorias/produtos/adicionais e imagens, página pública
@@ -18,10 +25,12 @@ exercitado em emulador (tela bloqueada de 30 minutos, Doze, perda de rede e proc
 ainda sem homologação em aparelho físico. A Etapa 6A adiciona planos, assinaturas, onboarding
 administrativo, período de teste, carência e bloqueio de novas vendas sem acesso comercial. A Etapa
 6B adiciona cobrança recorrente via **Asaas Sandbox**: perfil de faturamento, cliente/assinatura/
-cobrança Pix, webhook autenticado, conciliação manual e tratamento de atraso/estorno/chargeback. A
-loja só é liberada após um pagamento confirmado e verificado; criar a assinatura não libera. Nenhuma
-cobrança real em dinheiro, contrato ou conta de produção foi criada; a homologação usou apenas o
-Sandbox do Asaas.
+cobrança Pix, webhook autenticado, conciliação e tratamento de atraso/estorno/chargeback. A Etapa 7A
+separa o recebimento do processamento: webhook durável com ACK `200`, worker fora do ciclo HTTP com
+lease/retry/dead letter e conciliação automática protegida. O cron depende de configuração após o
+deploy. A loja só é liberada após um pagamento confirmado e verificado; criar a assinatura não libera.
+Nenhuma cobrança real em dinheiro, contrato ou conta de produção foi criada; a homologação usou
+apenas o Sandbox do Asaas.
 
 > Resultados reais, correções e pendências não bloqueantes: [docs/homologation.md](docs/homologation.md).
 
@@ -160,10 +169,13 @@ migrações. O bucket é público por desenho: não armazene dados privados nele
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | sim         | Chave pública (browser/SSR)                                |
 | `SUPABASE_SERVICE_ROLE_KEY`     | scripts     | Bootstrap, seed, cobrança e conciliação (nunca no browser) |
 | `ASAAS_API_KEY`                 | cobrança    | Chave do **Sandbox**; produção é rejeitada                 |
-| `ASAAS_WEBHOOK_TOKEN`           | webhook     | Token do header `asaas-access-token` (mínimo 24)           |
+| `ASAAS_WEBHOOK_TOKEN`           | webhook     | Token do header `asaas-access-token` (32–255)              |
 | `ASAAS_ENVIRONMENT`             | opcional    | Deve ser `sandbox`                                         |
 | `ASAAS_BASE_URL`                | opcional    | Somente `https://api-sandbox.asaas.com/v3`                 |
-| `BILLING_RECONCILE_LIMIT`       | opcional    | Assinaturas por execução da conciliação (1–100)            |
+| `BILLING_WORKER_SECRET`         | worker      | Segredo das rotas internas (32–255); fallback abaixo       |
+| `CRON_SECRET`                   | worker      | Fallback do segredo; usado pela Vercel Cron                |
+| `BILLING_WORKER_*`              | opcional    | Lote, lease, tentativas e orçamento do processador         |
+| `BILLING_RECONCILE_*`           | opcional    | Lote, pagamentos recentes e orçamento da conciliação       |
 | `NEXT_PUBLIC_SITE_URL`          | recomendada | Origem usada nos links de autenticação                     |
 | `SUPERADMIN_EMAIL`              | bootstrap   | E-mail do superadministrador                               |
 | `SUPERADMIN_NAME`               | opcional    | Nome exibido                                               |
@@ -184,6 +196,11 @@ Para exercitar a cobrança da Etapa 6B:
 3. Mantenha `ASAAS_ENVIRONMENT=sandbox` e `ASAAS_BASE_URL=https://api-sandbox.asaas.com/v3`.
    Qualquer credencial/endpoint de produção é rejeitado pelo código.
 4. Rode `npm run dev`, entre como owner e abra `/dashboard/assinatura`.
+5. Para processar webhooks e conciliar automaticamente, configure `BILLING_WORKER_SECRET` (ou
+   `CRON_SECRET`) e chame as rotas internas por um cron confiável. Sem agendador, os eventos ficam
+   pendentes e `/admin/billing` acusa `worker_not_running`. Para homologação local, publique a porta
+   3000 em HTTPS e rode `npm run billing:schedule -- --base-url https://SEU-DOMINIO`. Ver
+   [docs/billing-scheduler.md](docs/billing-scheduler.md).
 
 Sem essas variáveis, a cobrança fica desabilitada e o webhook responde `503`; o restante do produto
 funciona normalmente. O roteiro completo está em [docs/billing-sandbox.md](docs/billing-sandbox.md).
@@ -502,6 +519,7 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - [Webhooks](docs/webhooks.md)
 - [Idempotência](docs/billing-idempotency.md)
 - [Conciliação](docs/billing-reconciliation.md)
+- [Agendamento do faturamento](docs/billing-scheduler.md)
 - [Inadimplência e estornos](docs/billing-delinquency.md)
 - [Homologação no Asaas Sandbox](docs/billing-sandbox.md)
 - [Limitações de produção](docs/billing-production-limits.md)
@@ -517,8 +535,17 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - Não há gestão de funcionários na interface (apenas o modelo e as políticas).
 - Cobrança somente em **Asaas Sandbox**, homologada de ponta a ponta em 2026-11-04 (cobrança Pix,
   confirmação simulada, webhook autenticado e liberação da loja). Não há ativação de produção.
-- Não há worker/fila/agendador de cobrança; webhooks são síncronos e a conciliação é manual
-  (`npm run billing:reconcile`). Não há alerta automático de falha.
+- A Etapa 7A adicionou inbox durável, worker, leases, retry, dead letter e conciliação automática, e
+  a 7A.1 comprovou o ciclo automático em ambiente publicado. Ainda assim o cron **não está ativo por
+  padrão**: é preciso configurar `BILLING_WORKER_SECRET`/`CRON_SECRET` e um agendador estável após o
+  deploy. Sem ele, o webhook só persiste e a loja não é liberada. Ver
+  [docs/billing-scheduler.md](docs/billing-scheduler.md).
+- Não há alerta externo (e-mail/Slack/APM) configurado para worker parado, dead letter ou divergência
+  de conciliação. A 7A.2 entregou `GET /api/internal/billing/health`, que devolve `503` em estado
+  crítico e `200` quando está tudo bem, para que um monitor de uptime dispare o alerta; falta apenas
+  contratar/autorizar o monitor. O diagnóstico humano continua em `/admin/billing`.
+- O webhook responde `200` somente após persistir (nunca `202`) e não processa finanças na requisição.
+  Dead letters exigem revisão manual; não há envio externo de alerta.
 - Cobrança por Pix é pagamento por ciclo, **não débito automático**. Não há cartão, nota fiscal,
   split, repasse, multa/juros, cobrança retroativa ou autoatendimento de troca de plano.
 - O proprietário não marca faturas como pagas; só um pagamento confirmado e verificado libera a loja.
@@ -573,10 +600,13 @@ Detalhes completos em [docs/security.md](docs/security.md).
 ## Próxima etapa recomendada
 
 As Etapas 1 a 4 estão homologadas, a Etapa 5 tem homologação web parcial, a Etapa 6A está
-implementada e a Etapa 6B está **homologada no Asaas Sandbox** (produção não ativada). Antes de
-avançar, revisar [docs/billing-production-limits.md](docs/billing-production-limits.md), decidir
-sobre worker de conciliação e URL estável de webhook, e fazer a revisão deliberada da trava
-Sandbox-only. A Etapa 7 (endurecimento) e a ativação de produção não foram iniciadas. A recomendação
-de gateway continua em [docs/billing-providers.md](docs/billing-providers.md).
+implementada, a Etapa 6B está **homologada no Asaas Sandbox** e a Etapa 7A tem **homologação
+parcial** (produção não ativada). Antes de avançar, revisar
+[docs/billing-production-limits.md](docs/billing-production-limits.md), decidir a hospedagem estável
+(o orçamento levantado na 7A.2 está em [docs/homologation.md](docs/homologation.md)), ativar o cron do
+worker e da conciliação nessa URL, apontar um monitor externo para
+`/api/internal/billing/health` — e fazer a revisão deliberada da trava Sandbox-only. A Etapa 7
+(endurecimento amplo) e a ativação de produção não foram iniciadas. A recomendação de gateway
+continua em [docs/billing-providers.md](docs/billing-providers.md).
 Antes de retomar rastreamento, recomenda-se validar o app Android em aparelho físico e decidir sobre
 iOS.

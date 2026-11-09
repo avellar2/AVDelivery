@@ -412,6 +412,11 @@ export type Database = {
           last_error: string | null;
           received_at: string;
           processed_at: string | null;
+          next_attempt_at: string;
+          lease_token: string | null;
+          lease_expires_at: string | null;
+          last_attempt_at: string | null;
+          dead_lettered_at: string | null;
         };
         Insert: {
           id?: string;
@@ -426,12 +431,73 @@ export type Database = {
           last_error?: string | null;
           received_at?: string;
           processed_at?: string | null;
+          next_attempt_at?: string;
+          lease_token?: string | null;
+          lease_expires_at?: string | null;
+          last_attempt_at?: string | null;
+          dead_lettered_at?: string | null;
         };
         Update: {
           status?: string;
           attempts?: number;
           last_error?: string | null;
           processed_at?: string | null;
+          next_attempt_at?: string;
+          lease_token?: string | null;
+          lease_expires_at?: string | null;
+          last_attempt_at?: string | null;
+          dead_lettered_at?: string | null;
+        };
+        Relationships: [];
+      };
+      billing_job_runs: {
+        Row: {
+          id: string;
+          job_name: string;
+          status: string;
+          started_at: string;
+          finished_at: string | null;
+          claimed: number;
+          processed: number;
+          ignored: number;
+          retried: number;
+          dead_lettered: number;
+          reconciled: number;
+          divergences: number;
+          errors: number;
+          error: string | null;
+          metadata: Json;
+        };
+        Insert: {
+          id?: string;
+          job_name: string;
+          status?: string;
+          started_at?: string;
+          finished_at?: string | null;
+          claimed?: number;
+          processed?: number;
+          ignored?: number;
+          retried?: number;
+          dead_lettered?: number;
+          reconciled?: number;
+          divergences?: number;
+          errors?: number;
+          error?: string | null;
+          metadata?: Json;
+        };
+        Update: {
+          status?: string;
+          finished_at?: string | null;
+          claimed?: number;
+          processed?: number;
+          ignored?: number;
+          retried?: number;
+          dead_lettered?: number;
+          reconciled?: number;
+          divergences?: number;
+          errors?: number;
+          error?: string | null;
+          metadata?: Json;
         };
         Relationships: [];
       };
@@ -1060,6 +1126,60 @@ export type Database = {
           next_due_at: string | null;
         }>;
       };
+      billing_receive_webhook_event: {
+        Args: {
+          p_provider: string;
+          p_external_event_id: string;
+          p_event_type: string;
+          p_resource_type: string;
+          p_resource_id: string;
+          p_payload: Json;
+        };
+        Returns: Json;
+      };
+      billing_claim_webhook_events: {
+        Args: { p_limit?: number; p_lease_seconds?: number };
+        Returns: Array<{
+          id: string;
+          external_event_id: string;
+          event_type: string;
+          resource_type: string | null;
+          resource_id: string | null;
+          payload: Json;
+          attempts: number;
+          lease_token: string;
+          received_at: string;
+          last_attempt_at: string | null;
+        }>;
+      };
+      billing_recover_stale_webhook_events: {
+        Args: { p_max_attempts?: number };
+        Returns: Json;
+      };
+      billing_complete_webhook_event: {
+        Args: {
+          p_id: string;
+          p_lease_token: string;
+          p_outcome: string;
+          p_detail?: string | null;
+        };
+        Returns: Json;
+      };
+      billing_fail_webhook_event: {
+        Args: {
+          p_id: string;
+          p_lease_token: string;
+          p_reason: string;
+          p_retryable?: boolean;
+          p_delay_seconds?: number;
+          p_max_attempts?: number;
+        };
+        Returns: Json;
+      };
+      admin_get_billing_health: {
+        Args: Record<PropertyKey, never>;
+        Returns: Json;
+      };
       create_order: {
         Args: {
           p_store_slug: string;
@@ -1194,5 +1314,6 @@ export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 export type SubscriptionEventRow = Database["public"]["Tables"]["subscription_events"]["Row"];
 export type BillingCustomerRow = Database["public"]["Tables"]["billing_customers"]["Row"];
 export type BillingWebhookEventRow = Database["public"]["Tables"]["billing_webhook_events"]["Row"];
+export type BillingJobRunRow = Database["public"]["Tables"]["billing_job_runs"]["Row"];
 export type BillingCheckoutRequestRow =
   Database["public"]["Tables"]["billing_checkout_requests"]["Row"];

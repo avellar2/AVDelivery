@@ -77,9 +77,11 @@ o provedor.
 
 ## Limitações remanescentes
 
-- Sem worker/fila/agendador: a conciliação é manual e reenviável.
+- O processador de webhook e a conciliação automática existem, com leases, retry e dead letter, mas o
+  cron externo ainda **não foi ativado** em um ambiente publicado com URL estável. A homologação da
+  Etapa 7A é parcial nesse ponto; ver [billing-scheduler.md](billing-scheduler.md).
 - Sem cartão, nota fiscal, split, retenção automática ou notificações de cobrança.
-- Túnel de homologação é efêmero; produção exige URL estável.
+- O túnel de homologação da Etapa 6B era efêmero; produção exige URL estável.
 - Produção fora do escopo e bloqueada pela trava Sandbox-only.
 
 ## Como o código se protege

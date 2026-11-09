@@ -80,6 +80,9 @@ test.describe("homologação autenticada", () => {
     await expect(page.getByRole("heading", { name: "Configurações da loja" })).toBeVisible();
     await expect(page.getByLabel("Nome da loja")).toHaveValue("Burger Homologação");
 
+    await page.goto("/admin/billing");
+    await expect(page).toHaveURL(/\/dashboard/);
+
     await page.goto("/dashboard");
     await logout(page);
 
@@ -111,6 +114,11 @@ test.describe("homologação autenticada", () => {
 
     await page.goto("/admin?q=Pizza");
     await expect(page.getByText("Pizza Homologação").first()).toBeVisible();
+
+    await page.goto("/admin/billing");
+    await expect(page.getByRole("heading", { name: "Saúde do faturamento" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Alertas" })).toBeVisible();
+    await expect(page.getByText("Eventos por estado")).toBeVisible();
   });
 
   test("páginas públicas exibem dados reais sem sessão", async ({ page }) => {

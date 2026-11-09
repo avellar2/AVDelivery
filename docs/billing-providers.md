@@ -108,7 +108,8 @@ Pix/boleto (não apenas cartão), revisar tratamento de inadimplência e estorno
 - Perfil de faturamento mínimo do owner e vínculo de cliente externo por RPC de serviço.
 - Checkout idempotente que cria assinatura Pix mensal e primeira cobrança sem liberar a loja.
 - Webhook durável e autenticado, com consulta autoritativa ao provedor e aplicação transacional.
-- Conciliação manual reenviável; sem worker ou agendador.
+- Processador assíncrono e conciliação automática reenviáveis; o agendamento precisa ser configurado
+  no ambiente. Sem produção habilitada.
 - Tratamento de atraso, estorno, chargeback e reativação por pagamento confirmado.
 - Testes unitários, de integração real com dados simulados e E2E da interface.
 

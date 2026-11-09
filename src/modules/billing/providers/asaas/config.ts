@@ -6,7 +6,9 @@
  */
 
 export const ASAAS_SANDBOX_BASE_URL = "https://api-sandbox.asaas.com/v3";
-export const ASAAS_MIN_WEBHOOK_TOKEN_LENGTH = 24;
+/** Official Asaas webhook token range: 32 to 255 characters. */
+export const ASAAS_MIN_WEBHOOK_TOKEN_LENGTH = 32;
+export const ASAAS_MAX_WEBHOOK_TOKEN_LENGTH = 255;
 
 export type AsaasEnvironment = "sandbox";
 
@@ -120,6 +122,12 @@ export function resolveAsaasWebhookToken(env: Environment = process.env): string
   if (token.length < ASAAS_MIN_WEBHOOK_TOKEN_LENGTH) {
     throw new AsaasConfigurationError(
       `ASAAS_WEBHOOK_TOKEN deve ter pelo menos ${ASAAS_MIN_WEBHOOK_TOKEN_LENGTH} caracteres.`,
+    );
+  }
+
+  if (token.length > ASAAS_MAX_WEBHOOK_TOKEN_LENGTH) {
+    throw new AsaasConfigurationError(
+      `ASAAS_WEBHOOK_TOKEN deve ter no máximo ${ASAAS_MAX_WEBHOOK_TOKEN_LENGTH} caracteres.`,
     );
   }
 
