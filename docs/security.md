@@ -540,6 +540,15 @@ ao servidor é a interna (`https://localhost:10000` na Render) e o navegador ter
 `ERR_CONNECTION_REFUSED`. O `Location` relativo mantém mesma origem, dispensa `Host`/`X-Forwarded-*` e
 fecha a porta para redirecionamento baseado em cabeçalho forjado.
 
+Links enviados por e-mail (recuperação de senha, convite de entregador) passam por
+`redirectTo` explícito, montado a partir de `NEXT_PUBLIC_SITE_URL` (`getSiteOrigin`). O allowlist do
+Auth precisa conter esse destino, então `supabase/config.toml` declara em
+`auth.additional_redirect_urls` as quatro URLs locais (`localhost`/`127.0.0.1` nas portas 3000 e 3100) **e** `https://avdelivery-homolog.onrender.com/auth/confirm`. O `supabase config push`
+aplicou a lista no projeto remoto e `supabase config diff` passou a retornar zero diferenças.
+`auth.site_url` continua `http://localhost:3000` porque o projeto de homologação também é usado
+localmente; como nenhum fluxo depende do fallback do `site_url` (todos enviam `redirectTo`
+explícito), o destino em produção continua sendo o host publicado.
+
 ## Cabeçalhos e superfície HTTP
 
 `next.config.ts` adiciona:

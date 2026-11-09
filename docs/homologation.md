@@ -1420,6 +1420,15 @@ Correção: `src/lib/redirect-response.ts` responde com `Location` **relativo** 
 fazia), sem depender de `Host`/`X-Forwarded-*`, mais 4 testes unitários de regressão. Depois do
 deploy do commit `a58ca0c`, o E2E remoto passou 5/5.
 
+Um segundo defeito, de configuração, foi encontrado na mesma revisão: o Auth remoto só permitia
+`redirectTo` para as URLs locais, então um link de recuperação de senha pedido na URL publicada
+poderia ser recusado. `supabase/config.toml` passou a declarar
+`https://avdelivery-homolog.onrender.com/auth/confirm` em `auth.additional_redirect_urls`, o
+`supabase config push --yes` aplicou a lista no projeto de homologação e o `supabase config diff`
+seguinte retornou **zero diferenças**. `auth.site_url` permanece `http://localhost:3000` de
+propósito, para não quebrar os fluxos locais; os e-mails usam `redirectTo` explícito derivado de
+`NEXT_PUBLIC_SITE_URL`, que na Render aponta para a URL publicada.
+
 ### Monitoramento e alertas
 
 **GitHub Actions** (`.github/workflows/billing-health.yml`, ativo na branch padrão desde o merge do
@@ -1458,6 +1467,7 @@ até lá não existe conta/API key para conferir o estado do monitor.
 | Suíte local                                        | typecheck, lint, `format:check`, 372 testes unitários, 17 E2E, build      |
 | Dead letters                                       | os mesmos 8 eventos de sondagem da 7A.1, sem reprocessamento nem exclusão |
 | Migrações                                          | 27 → 28; `db advisors` sem achado novo de `pg_cron`/`pg_net`/Vault        |
+| Auth remoto (allowlist de redirecionamento)        | `additional_redirect_urls` com a URL da Render; `config diff` = 0         |
 
 ### Segurança
 
