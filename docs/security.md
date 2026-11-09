@@ -627,6 +627,12 @@ endereços nunca são logados.
     temporária. As rotas internas continuaram fechadas (401 sem segredo ou com segredo fora da faixa)
     e o webhook exigiu `asaas-access-token`; nenhum dado de produção estava no processo. Um túnel não
     substitui hospedagem com domínio próprio, TLS gerenciado e monitoramento.
+31. **Monitoramento depende de serviço externo autorizado** — a rota
+    `/api/internal/billing/health` da 7A.2 expõe apenas contadores, carimbos de tempo e o erro
+    sanitizado da última execução; não devolve documento, valor, payload, token nem chave, e exige o
+    mesmo segredo dedicado das rotas de trabalho. Ainda assim ela é um endpoint público: quem tiver o
+    segredo consegue observar a saúde da automação (não consegue alterar nada). Sem um monitor
+    contratado/autorizado não há notificação ativa — o `503` só produz efeito quando alguém o observa.
 
 ## Checklist operacional
 
@@ -655,6 +661,8 @@ endereços nunca são logados.
 - [x] Etapa 7A.1: rotas internas continuaram em `401` quando publicadas por HTTPS sem segredo ou com
       segredo fora da faixa; webhook rejeitou token inválido; entrega externa real processada fora do
       ciclo HTTP; duplicidade e evento fora de ordem sem efeito financeiro repetido.
+- [x] Etapa 7A.2: rota de saúde sem PII (`200` em `ok`/aviso, `503` em crítico, `401` sem segredo),
+      com testes de decisão e de autorização; orçamento de hospedagem estável levantado.
 - [ ] Hospedagem HTTPS estável com cron permanente e alerta externo de falha/dead letter/divergência.
 - [ ] Revogação de permissão em tempo de execução e ciclo de reatribuição/conclusão no app.
 - [ ] Validar GPS físico e comportamento com tela bloqueada em Android e iOS.

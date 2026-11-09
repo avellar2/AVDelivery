@@ -251,7 +251,9 @@ ponta. Produção continua explicitamente fora do escopo desta etapa.
 > automática, job runs e diagnóstico de saúde foram implementados e exercitados contra o Supabase de
 > homologação. Na **Etapa 7A.1** o app foi publicado por túnel HTTPS e o agendador rodou de verdade:
 > nova entrega externa do Asaas, processamento automático, concorrência, recuperação de lease e de
-> backlog foram comprovados. Permanece parcial porque a URL é efêmera e não há alerta externo. Ver
+> backlog foram comprovados. Na **Etapa 7A.2** foi entregue a rota de saúde para monitor externo e
+> levantado o custo real de hospedagem estável; a contratação depende de autorização do responsável
+> pelo projeto. Permanece parcial porque a URL é efêmera e não há alerta externo. Ver
 > [homologation.md](homologation.md) e [billing-scheduler.md](billing-scheduler.md).
 
 Entregue:
@@ -276,8 +278,13 @@ Entregue:
       reenvio idempotente, concorrência, recuperação de lease e de backlog comprovados.
 - [x] Testes unitários e de integração real cobrindo concorrência, lease, recuperação, dead letter,
       permissões e ausência de PII.
-- [ ] URL HTTPS **estável** (Vercel, domínio próprio ou túnel nomeado) com execução contínua.
-- [ ] Alerta externo (e-mail/Slack/APM) para falha de worker, dead letter e divergência.
+- [x] Rota `/api/internal/billing/health` para monitor externo: JSON sem PII, `503` em estado
+      crítico, `200` em `ok`/aviso, com 16 testes unitários de decisão e de autorização.
+- [ ] URL HTTPS **estável** (Vercel, domínio próprio ou túnel nomeado) com execução contínua —
+      bloqueada por falta de conta/plano autorizado (ver orçamento em
+      [homologation.md](homologation.md)).
+- [ ] Alerta externo (e-mail/Slack/APM) para falha de worker, dead letter e divergência — a rota de
+      saúde é o insumo; falta o canal autorizado.
 
 Fora do escopo da 7A: produção, cartão, nota fiscal, MFA/auditoria administrativa ampla, rate limit
 distribuído, CSP e observabilidade externa. A Etapa 7B não foi iniciada.

@@ -10,8 +10,10 @@ não ativada** em projeto Supabase exclusivo de testes (2026-10-29 a 2026-11-05)
 
 A Etapa 7A.1 publicou o aplicativo por HTTPS, ligou o agendador (worker a cada minuto, conciliação a
 cada 15 minutos) e comprovou entrega externa real do Asaas Sandbox, processamento automático,
-duplicidade idempotente, concorrência e recuperação de lease e de backlog. A etapa continua parcial
-porque a URL usada foi um túnel efêmero e não há alerta externo configurado.
+duplicidade idempotente, concorrência e recuperação de lease e de backlog. A Etapa 7A.2 acrescentou
+uma rota de saúde sem PII para monitor externo e comparou as opções reais de hospedagem estável; a
+etapa continua parcial porque a URL usada foi um túnel efêmero, não há hospedagem autorizada
+contratada e nenhum canal de alerta externo está configurado.
 
 A plataforma entrega autenticação, isolamento multiempresa por RLS, painel do estabelecimento,
 superadministrador, cardápio digital com categorias/produtos/adicionais e imagens, página pública
@@ -538,8 +540,10 @@ Detalhes completos em [docs/security.md](docs/security.md).
   padrão**: é preciso configurar `BILLING_WORKER_SECRET`/`CRON_SECRET` e um agendador estável após o
   deploy. Sem ele, o webhook só persiste e a loja não é liberada. Ver
   [docs/billing-scheduler.md](docs/billing-scheduler.md).
-- Não há alerta externo (e-mail/Slack/APM) para worker parado, dead letter ou divergência de
-  conciliação; o diagnóstico vive em `/admin/billing` e no log do agendador local.
+- Não há alerta externo (e-mail/Slack/APM) configurado para worker parado, dead letter ou divergência
+  de conciliação. A 7A.2 entregou `GET /api/internal/billing/health`, que devolve `503` em estado
+  crítico e `200` quando está tudo bem, para que um monitor de uptime dispare o alerta; falta apenas
+  contratar/autorizar o monitor. O diagnóstico humano continua em `/admin/billing`.
 - O webhook responde `200` somente após persistir (nunca `202`) e não processa finanças na requisição.
   Dead letters exigem revisão manual; não há envio externo de alerta.
 - Cobrança por Pix é pagamento por ciclo, **não débito automático**. Não há cartão, nota fiscal,
@@ -598,9 +602,11 @@ Detalhes completos em [docs/security.md](docs/security.md).
 As Etapas 1 a 4 estão homologadas, a Etapa 5 tem homologação web parcial, a Etapa 6A está
 implementada, a Etapa 6B está **homologada no Asaas Sandbox** e a Etapa 7A tem **homologação
 parcial** (produção não ativada). Antes de avançar, revisar
-[docs/billing-production-limits.md](docs/billing-production-limits.md), ativar o cron do worker e da
-conciliação em ambiente com URL estável, configurar alerta externo e fazer a revisão deliberada da
-trava Sandbox-only. A Etapa 7 (endurecimento amplo) e a ativação de produção não foram iniciadas. A
-recomendação de gateway continua em [docs/billing-providers.md](docs/billing-providers.md).
+[docs/billing-production-limits.md](docs/billing-production-limits.md), decidir a hospedagem estável
+(o orçamento levantado na 7A.2 está em [docs/homologation.md](docs/homologation.md)), ativar o cron do
+worker e da conciliação nessa URL, apontar um monitor externo para
+`/api/internal/billing/health` — e fazer a revisão deliberada da trava Sandbox-only. A Etapa 7
+(endurecimento amplo) e a ativação de produção não foram iniciadas. A recomendação de gateway
+continua em [docs/billing-providers.md](docs/billing-providers.md).
 Antes de retomar rastreamento, recomenda-se validar o app Android em aparelho físico e decidir sobre
 iOS.

@@ -14,6 +14,12 @@ o agendador (worker a cada minuto, conciliação a cada 15 minutos) e comprovou 
 Asaas Sandbox, processamento automático, concorrência, recuperação de lease e de backlog. Permanece
 **parcial** porque a URL do túnel é efêmera e não existe alerta externo configurado.
 
+A **Etapa 7A.2**, também em 2026-11-05, entregou a rota `/api/internal/billing/health` para monitor
+externo (JSON sem PII, `503` em estado crítico, `401` sem segredo), comprovou o `503` com o agendador
+parado e a recuperação automática ao religá-lo, e levantou os preços das opções reais de hospedagem.
+Continua **parcial e bloqueada**: contratar a hospedagem estável custa cerca de US$ 20/mês e depende
+de autorização; até lá tudo roda no computador do usuário, atrás de túnel efêmero.
+
 As Etapas 3, 4 e 5 foram validadas contra o projeto Supabase real de homologação, com migrações
 aplicadas, integração, E2E e revisão visual em desktop e mobile. Na Etapa 5, o GPS web em primeiro
 plano foi validado; o envio com tela bloqueada/app em segundo plano permanece pendente por falta de
@@ -1335,3 +1341,92 @@ npm run billing:schedule -- --base-url https://SEU-DOMINIO
 
 O script `scripts/billing-scheduler.mjs` exige `BILLING_WORKER_SECRET` (ou `CRON_SECRET`) com 32 a
 255 caracteres e só aceita HTTPS fora de localhost.
+
+## Etapa 7A.2 — hospedagem estável, agendamento permanente e alertas (2026-11-05)
+
+Objetivo: eliminar a dependência do computador do usuário e do túnel efêmero, obter HTTPS estável,
+agendamento permanente e monitoramento de falhas com alerta externo.
+
+**Status: PARCIAL — bloqueada por autorização de contratação.** Nenhum serviço foi contratado, nenhum
+domínio foi comprado e nenhum custo recorrente foi assumido. O que não dependia de autorização foi
+entregue e validado: a rota de saúde para monitor externo, o levantamento verificado de preços e a
+validação completa (typecheck, lint, format, 368 testes unitários, 17 E2E, build, migrações e
+advisors).
+
+### Auditoria de infraestrutura e segredos
+
+| Verificação                                                             | Resultado                                                                             |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Conta/projeto de hospedagem autorizado                                  | **Não existe.** Sem conta Vercel, sem CLI `vercel`, sem token, sem `gh`               |
+| Credenciais de túnel nomeado (`~/.cloudflared`)                         | Ausentes — só o binário do túnel rápido (efêmero)                                     |
+| Outras plataformas (Netlify, Fly, Railway, Render, AWS, GCP, Azure, DO) | Nenhuma CLI, conta ou variável de ambiente configurada                                |
+| Segredos no repositório                                                 | Nenhum. `.env.local` ignorado; `.env.example` só com nomes                            |
+| Segredos em logs/respostas                                              | Rotas devolvem JSON sanitizado; chamadas de teste nunca imprimiram o valor do segredo |
+| Migrações aplicadas                                                     | 0 novas nesta etapa; nenhum `db reset` remoto                                         |
+
+### Opções de hospedagem comparadas (preços verificados em 2026-11-05)
+
+| Opção                                  | Cron / cadência                                                                  | HTTPS e domínio                                              | Custo                                                                         | Situação                       |
+| -------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------- | ------------------------------ |
+| **Vercel Pro** (recomendada)           | cron por minuto e por projeto (100 jobs); precisão de minuto                     | HTTPS automático; 1 domínio grátis no 1º ano em TLD elegível | **US$ 20/mês** de taxa de plataforma, 1 assento, com US$ 20 de crédito mensal | Requer autorização             |
+| Vercel Hobby                           | **1 execução por dia**, precisão por hora — expressão por minuto falha no deploy | HTTPS em `*.vercel.app`                                      | gratuito                                                                      | Não atende à cadência          |
+| Supabase Cron (`pg_cron` + `pg_net`)   | 1 min / 15 min, sem custo adicional sobre o projeto Supabase                     | **não hospeda** — só chama um endpoint HTTPS externo         | incluído no projeto; segredo no Vault                                         | Só serve combinado com um host |
+| Túnel rápido (cloudflared)             | depende do PC do usuário                                                         | URL aleatória, sem SLA, muda a cada execução                 | gratuito                                                                      | **Não é hospedagem**           |
+| Túnel nomeado (Cloudflare)             | depende de um host rodando                                                       | exige conta Cloudflare + domínio no Cloudflare               | requer conta e domínio; não cotado                                            | Requer autorização             |
+| VPS/cron próprio, Railway, Render, Fly | cadência livre                                                                   | HTTPS/domínio a configurar                                   | não cotado nesta etapa                                                        | Não avaliado                   |
+
+Observações que pesam na recomendação:
+
+- A cobrança é Pix de R$ 59,90/mês por loja; os US$ 20/mês da Vercel Pro são o único custo recorrente
+  novo identificado para tirar a operação do PC do usuário, e a taxa inclui US$ 20 de crédito de uso.
+- O worker a cada minuto custa ~43.200 invocações/mês e a conciliação ~2.880/mês; ambas consomem do
+  crédito incluído, mas o custo de função deve ser conferido em produção.
+- Sem hospedagem estável, ativar `pg_cron`/`pg_net` não resolve: não há URL fixa para chamar.
+- Não foi escolhida a opção mais cara: a comparação ficou restrita ao tier mínimo que atende à
+  cadência de 1 minuto exigida pelo worker.
+
+**Bloqueio exato:** contratar a hospedagem exige conta paga, cartão e custo recorrente de
+aproximadamente US$ 20/mês — decisão que a etapa não pode tomar sozinha. Até a autorização, a
+operação continua dependendo do PC do usuário, o que mantém a homologação **parcial** por definição.
+
+### Entregue nesta etapa: rota de saúde para monitor externo
+
+`src/modules/billing/job-health.ts` + `src/app/api/internal/billing/health/route.ts`:
+
+- `GET`/`POST` protegidos pelo mesmo segredo dedicado das rotas de trabalho (32–255 caracteres,
+  comparação em tempo constante, falha fechada);
+- devolve contadores, carimbos de tempo e o erro sanitizado da última execução — **sem** payload,
+  documento, valor, token ou chave;
+- `200` em `ok`/`warning` (só dead letter), **`503` quando qualquer alerta for crítico**, `401` sem
+  segredo e `503` se o segredo não estiver configurado ou a leitura falhar;
+- alertas: `worker_not_running` (>10 min), `worker_last_failed`, `reconciliation_not_running` (>2 h),
+  `reconciliation_last_failed`, `pending_backlog` (>5 min), `stale_processing`, `dead_letter`;
+- 16 testes unitários novos cobrindo cada regra, a autorização e a falha fechada.
+
+Sem essa rota, um monitor de uptime não teria como detectar que o faturamento parou: `/admin/billing`
+exige sessão de superadministrador e um navegador.
+
+### Evidências da 7A.2 (ambiente da 7A.1 ainda publicado por túnel)
+
+| Verificação                               | Resultado                                                                                       |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Rota de saúde sem credencial (pelo túnel) | `401 {"ok":false,"error":"unauthorized"}`                                                       |
+| Rota de saúde com credencial (pelo túnel) | `200` com `status: "warning"` e `alerts: ["dead_letter"]` (os 8 da 7A.1)                        |
+| Agendador parado por ~15 min              | `503` às 19:53:15 UTC com `status: "critical"` e `alerts: ["dead_letter","worker_not_running"]` |
+| Agendador religado                        | worker executou às 19:54:06 UTC e a rota voltou a `200` em 19:54:30, sem intervenção            |
+| Agendador duplicado                       | duas instâncias do script rodaram juntas sem processamento duplicado (claim atômico)            |
+| Suíte completa                            | typecheck, lint, `format:check`, 368 testes unitários (35 arquivos), 17 E2E, build              |
+| Build                                     | inclui `/api/internal/billing/health` como rota dinâmica                                        |
+
+### O que continua pendente (7A.2)
+
+- [ ] Hospedagem estável autorizada e contratada (Vercel Pro ou equivalente) com deploy por Git.
+- [ ] Cron permanente nessa hospedagem: worker a cada minuto e conciliação a cada 15 minutos.
+- [ ] Monitor externo apontado para `/api/internal/billing/health` com o header `Authorization` e
+      alerta em resposta diferente de `200` (ou em `status != "ok"` para cobrir dead letter).
+- [ ] Rotação dos segredos antes de qualquer uso real.
+
+**Conclusão: ETAPA 7A.2 PARCIAL.** A parte independente de contratação foi concluída e provada
+(rota de saúde, preços verificados, suíte verde), mas **hospedagem estável, cron permanente e alerta
+externo dependem de autorização de custo** e não existem hoje. O ciclo automático continua rodando
+apenas enquanto o PC do usuário estiver ligado e o túnel ativo.

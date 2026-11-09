@@ -28,14 +28,32 @@ ativar cobrança real.
 - A conciliação automática cobre pagamentos recentes e cobranças órfãs, mas examina no máximo 100
   assinaturas por execução e 100 pagamentos recentes; o que exceder o lote fica para a próxima.
 - Sem cron ativo, indisponibilidade ou perda de webhook deixam eventos pendentes; a página
-  `/admin/billing` acusa `worker_not_running`/`pending_backlog`, mas **não há envio de alerta** por
-  e-mail/Slack.
+  `/admin/billing` acusa `worker_not_running`/`pending_backlog`.
+- **Não há alerta externo configurado.** A Etapa 7A.2 entregou `GET /api/internal/billing/health`
+  (JSON sem PII, `503` em estado crítico, `200` em `ok`/aviso) para que um monitor de uptime dispare a
+  notificação, mas nenhum monitor foi contratado/autorizado; o `503` só alerta quando alguém observa.
 - Não há alerta automático externo de falha de webhook, divergência de conciliação ou inadimplência;
-  o diagnóstico é uma tela administrativa.
+  o diagnóstico é uma tela administrativa mais a rota de saúde.
 - `billing_job_runs` usa a mesma tabela para as duas rotas; não há métrica exportada para
   Prometheus/APM nem tracing distribuído.
 - O tempo de execução é limitado a ~55 s por chamada (`maxDuration = 60`); lotes maiores dependem de
   várias execuções do cron.
+
+## Hospedagem e disponibilidade
+
+- **Não há hospedagem estável contratada.** A Etapa 7A.2 levantou as opções reais e os preços (ver
+  [homologation.md](homologation.md)) e registrou a pendência de autorização: contratar um plano,
+  assumir custo recorrente e comprar domínio dependem de decisão do responsável pelo projeto.
+- Enquanto isso, o processo roda no computador de desenvolvimento (`next start`) exposto por túnel
+  rápido: a URL muda, não há SLA, logs locais e o agendador morre com a máquina. Isso **não** é
+  hospedagem e não sustenta cobrança real.
+- A Vercel no plano gratuito não executa cron a cada minuto; a cadência de 1 minuto do worker exige o
+  plano Pro (US$ 20/mês por usuário, verificado em 2026-11) ou outro agendador equivalente. O mesmo
+  vale para conciliação a cada 15 minutos.
+- Sem domínio próprio não há TLS estável, e-mail transacional confiável nem URL fixa para o webhook do
+  Asaas — que precisa ser reconfigurado a cada troca de túnel.
+- Multiempresa em escala, múltiplas regiões, autoscaling, backup/PITR e plano de continuidade não
+  foram avaliados; o Supabase de homologação é um projeto único na região West US.
 
 ## Segurança e operação
 

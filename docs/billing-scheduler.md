@@ -12,6 +12,7 @@ agendador usado foi o script local descrito abaixo, apontado para um túnel HTTP
 | ----------------------------------------------- | ----------------- | --------------------------------- |
 | `/api/internal/billing/worker` (GET ou POST)    | 1 minuto          | processa a inbox durável          |
 | `/api/internal/billing/reconcile` (GET ou POST) | 15 minutos        | concilia assinaturas e pagamentos |
+| `/api/internal/billing/health` (GET ou POST)    | 5–15 minutos      | saúde para monitor externo        |
 
 Ambas:
 
@@ -173,6 +174,60 @@ de uptime). Requisitos:
 - Rotacione o segredo atualizando o ambiente e o agendador; a comparação é feita a cada requisição.
 - As rotas não são acessíveis pelo navegador do usuário e não aceitam sessão de owner/superadmin.
 
+## Rota de saúde para monitor externo
+
+`/api/internal/billing/health` (GET ou POST) existe para que um monitor de uptime pergunte, sem
+sessão de navegador, se o faturamento automático está executando. Mesma proteção das rotas de
+trabalho: `Authorization: Bearer <segredo>` (ou `x-billing-worker-secret`), segredo dedicado de 32 a
+255 caracteres, comparação em tempo constante e falha fechada.
+
+```powershell
+curl -H "Authorization: Bearer $BILLING_WORKER_SECRET" https://SEU-DOMINIO/api/internal/billing/health
+```
+
+Resposta (sem PII, sem payload, sem token; `Cache-Control: no-store`):
+
+```json
+{
+  "ok": true,
+  "status": "warning",
+  "alerts": ["dead_letter"],
+  "checkedAt": "2026-11-05T19:31:46.209Z",
+  "pending": 0,
+  "oldestPendingAt": null,
+  "pendingAgeSeconds": null,
+  "staleProcessing": 0,
+  "deadLetter": 8,
+  "failed": 0,
+  "lastWorkerRun": { "status": "succeeded", "finishedAt": "2026-11-05T19:30:51.746321+00:00" },
+  "lastReconciliationRun": {
+    "status": "succeeded",
+    "finishedAt": "2026-11-05T19:30:55.491116+00:00"
+  }
+}
+```
+
+Regras de decisão (limiares fixos, cobertos por teste unitário):
+
+| Alerta                       | Condição                                        | Gravidade |
+| ---------------------------- | ----------------------------------------------- | --------- |
+| `worker_not_running`         | última execução há mais de 10 min, ou nenhuma   | crítico   |
+| `worker_last_failed`         | última execução do worker com `status = failed` | crítico   |
+| `reconciliation_not_running` | última conciliação há mais de 2 h, ou nenhuma   | crítico   |
+| `reconciliation_last_failed` | última conciliação com `status = failed`        | crítico   |
+| `pending_backlog`            | evento em `received` há mais de 5 min           | crítico   |
+| `stale_processing`           | evento em `processing` com lease expirado       | crítico   |
+| `dead_letter`                | pelo menos um evento em `dead_letter`           | aviso     |
+
+Códigos HTTP: `200` quando o estado é `ok` ou `warning` (só dead letter), `503` quando qualquer alerta
+crítico está presente, `401` sem credencial e `503` quando o segredo não está configurado ou a leitura
+do banco falha (`alerts: ["health_unavailable"]`). O `503` é o que faz o monitor externo disparar: o
+corpo continua em JSON legível para diagnóstico.
+
+O monitor deve ser configurado com o header, intervalo de 5 a 15 minutos, e alerta em qualquer
+resposta diferente de `200` — inclusive `401` (segredo rotacionado sem atualizar o monitor) e `503`.
+Não há envio de e-mail/Slack pelo aplicativo; o canal é o do próprio monitor.
+
 ## Custos e observabilidade
 
 - Cada execução é uma invocação de função. Worker a cada minuto = ~43.200 invocações/mês; conciliação
@@ -182,8 +237,9 @@ de uptime). Requisitos:
   - `worker_not_running` (> 10 min sem execução);
   - `worker_last_failed`, `reconciliation_not_running` (> 2 h) e `reconciliation_last_failed`;
   - `pending_backlog`, `stale_processing` e `dead_letter`.
-- Não há envio de e-mail/Slack. Para alerta externo, monitore `billing_job_runs` ou a resposta das
-  rotas com a ferramenta de observabilidade escolhida.
+- Não há envio de e-mail/Slack. Para alerta externo, use `/api/internal/billing/health` em um monitor
+  de uptime (seção acima) e/ou monitore `billing_job_runs` com a ferramenta de observabilidade
+  escolhida.
 
 ## Checklist de ativação
 
