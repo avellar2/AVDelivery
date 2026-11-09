@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { safeRedirectPath } from "@/lib/redirects";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createSupabaseRouteClient } from "@/lib/supabase/route";
+import { getSiteOrigin } from "@/modules/auth/site-url";
 
 const ALLOWED_OTP_TYPES = new Set<EmailOtpType>([
   "recovery",
@@ -16,7 +17,10 @@ const ALLOWED_OTP_TYPES = new Set<EmailOtpType>([
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
-  const origin = url.origin;
+  // `request.url` carries the host the Node server sees, which behind a reverse
+  // proxy (Render, Docker, nginx) is the internal `localhost:PORT`. Redirects
+  // must use the public origin instead, or the browser is sent to `localhost`.
+  const origin = await getSiteOrigin();
   const next = safeRedirectPath(url.searchParams.get("next"), "/dashboard");
   const tokenHash = url.searchParams.get("token_hash");
   const type = url.searchParams.get("type");
