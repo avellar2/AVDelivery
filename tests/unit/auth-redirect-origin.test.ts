@@ -3,12 +3,6 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const siteOrigin = vi.fn(async () => "https://homolog.example.com");
-
-vi.mock("@/modules/auth/site-url", () => ({
-  getSiteOrigin: () => siteOrigin(),
-}));
-
 vi.mock("@/lib/supabase/config", () => ({
   isSupabaseConfigured: vi.fn(() => true),
 }));
@@ -22,12 +16,11 @@ vi.mock("@/lib/supabase/route", () => ({
 import { GET as confirm } from "@/app/auth/confirm/route";
 import { POST as signOut } from "@/app/auth/signout/route";
 
-// A reverse proxy hands the app an internal host; browsers must never see it.
-const internalUrl = "https://localhost:10000/auth/signout";
+// A reverse proxy hands the app an internal host; the browser must never see it.
+const internalUrl = "https://localhost:10000";
 
-describe("redirects de autenticação usam a origem pública", () => {
+describe("redirects de autenticação não vazam o host interno", () => {
   beforeEach(() => {
-    siteOrigin.mockClear();
     createSupabaseRouteClient.mockReset();
     createSupabaseRouteClient.mockReturnValue(null);
   });
@@ -36,36 +29,47 @@ describe("redirects de autenticação usam a origem pública", () => {
     vi.restoreAllMocks();
   });
 
-  it("signout redireciona para a origem pública e não para o host interno", async () => {
-    const response = await signOut(new NextRequest(internalUrl, { method: "POST" }));
-
-    expect(siteOrigin).toHaveBeenCalled();
-    expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("https://homolog.example.com/login");
-  });
-
-  it("confirm sem token redireciona para o login público", async () => {
-    const request = new NextRequest("https://localhost:10000/auth/confirm");
-
-    const response = await confirm(request);
-
-    expect(siteOrigin).toHaveBeenCalled();
-    expect(response.headers.get("location")).toBe(
-      "https://homolog.example.com/login?error=link_invalido",
+  it("signout responde com Location relativo", async () => {
+    const response = await signOut(
+      new NextRequest(`${internalUrl}/auth/signout`, { method: "POST" }),
     );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/login");
   });
 
-  it("confirm com token válido redireciona para o destino público", async () => {
+  it("confirm sem token responde com Location relativo", async () => {
+    const response = await confirm(new NextRequest(`${internalUrl}/auth/confirm`));
+
+    expect(response.headers.get("location")).toBe("/login?error=link_invalido");
+  });
+
+  it("confirm com token válido redireciona para o destino pedido", async () => {
     const verifyOtp = vi.fn(async () => ({ error: null }));
     createSupabaseRouteClient.mockReturnValue({ auth: { verifyOtp } });
 
-    const request = new NextRequest(
-      "https://localhost:10000/auth/confirm?token_hash=abc123&type=recovery&next=/reset-password",
+    const response = await confirm(
+      new NextRequest(
+        `${internalUrl}/auth/confirm?token_hash=abc123&type=recovery&next=/reset-password`,
+      ),
     );
 
-    const response = await confirm(request);
-
     expect(verifyOtp).toHaveBeenCalledWith({ token_hash: "abc123", type: "recovery" });
-    expect(response.headers.get("location")).toBe("https://homolog.example.com/reset-password");
+    expect(response.headers.get("location")).toBe("/reset-password");
+  });
+
+  it("não usa o host da requisição em nenhum redirecionamento", async () => {
+    const responses = [
+      await signOut(new NextRequest(`${internalUrl}/auth/signout`, { method: "POST" })),
+      await confirm(new NextRequest(`${internalUrl}/auth/confirm`)),
+      await confirm(new NextRequest(`${internalUrl}/auth/confirm?error=access_denied`)),
+    ];
+
+    for (const response of responses) {
+      const location = response.headers.get("location") ?? "";
+      expect(location.startsWith("/")).toBe(true);
+      expect(location).not.toContain("localhost");
+      expect(location).not.toContain("http");
+    }
   });
 });

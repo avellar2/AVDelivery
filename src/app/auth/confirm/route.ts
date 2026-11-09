@@ -1,10 +1,10 @@
 import type { EmailOtpType } from "@supabase/supabase-js";
-import { NextResponse, type NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 
+import { redirectToPath } from "@/lib/redirect-response";
 import { safeRedirectPath } from "@/lib/redirects";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createSupabaseRouteClient } from "@/lib/supabase/route";
-import { getSiteOrigin } from "@/modules/auth/site-url";
 
 const ALLOWED_OTP_TYPES = new Set<EmailOtpType>([
   "recovery",
@@ -17,25 +17,21 @@ const ALLOWED_OTP_TYPES = new Set<EmailOtpType>([
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
-  // `request.url` carries the host the Node server sees, which behind a reverse
-  // proxy (Render, Docker, nginx) is the internal `localhost:PORT`. Redirects
-  // must use the public origin instead, or the browser is sent to `localhost`.
-  const origin = await getSiteOrigin();
   const next = safeRedirectPath(url.searchParams.get("next"), "/dashboard");
   const tokenHash = url.searchParams.get("token_hash");
   const type = url.searchParams.get("type");
   const code = url.searchParams.get("code");
 
   if (!isSupabaseConfigured()) {
-    return NextResponse.redirect(new URL("/login", origin));
+    return redirectToPath("/login");
   }
 
   if (url.searchParams.get("error")) {
-    return NextResponse.redirect(new URL("/login?error=link_invalido", origin));
+    return redirectToPath("/login?error=link_invalido");
   }
 
-  const successResponse = NextResponse.redirect(new URL(next, origin));
-  const failureResponse = NextResponse.redirect(new URL("/login?error=link_invalido", origin));
+  const successResponse = redirectToPath(next);
+  const failureResponse = redirectToPath("/login?error=link_invalido");
   const supabase = createSupabaseRouteClient(request, successResponse);
 
   if (!supabase) {
