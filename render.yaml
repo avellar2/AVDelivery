@@ -1,0 +1,40 @@
+# Render Blueprint for the AVDelivery homologation host.
+#
+# Free plan on purpose: this is a homologation deployment connected to the
+# Supabase homologation project and the Asaas Sandbox. It is not production and
+# must not receive real charges. The free instance sleeps after 15 minutes
+# without inbound traffic; the Supabase cron calls the worker every minute,
+# which keeps it awake while the scheduler is active.
+#
+# Secrets are never committed: every `sync: false` value is provided through the
+# Render dashboard/CLI when the service is created.
+services:
+  - type: web
+    name: avdelivery-homolog
+    runtime: node
+    plan: free
+    region: oregon
+    branch: feat/stage-7a-billing-reliability
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    autoDeployTrigger: off
+    envVars:
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: NEXT_PUBLIC_SITE_URL
+        value: https://avdelivery-homolog.onrender.com
+      - key: ASAAS_ENVIRONMENT
+        value: sandbox
+      - key: ASAAS_BASE_URL
+        value: https://api-sandbox.asaas.com/v3
+      - key: ASAAS_API_KEY
+        sync: false
+      - key: ASAAS_WEBHOOK_TOKEN
+        sync: false
+      - key: BILLING_WORKER_SECRET
+        sync: false
