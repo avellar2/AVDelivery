@@ -1464,7 +1464,7 @@ até lá não existe conta/API key para conferir o estado do monitor.
 | `/api/internal/billing/health` com segredo         | `200`, `status: "warning"`, `alerts: ["dead_letter"]`, `deadLetter: 8`    |
 | `/api/internal/billing/worker` e webhook sem chave | `401`                                                                     |
 | E2E remoto de homologação                          | 5/5 (login, isolamento A/B, superadmin, páginas públicas, recuperação)    |
-| Suíte local                                        | typecheck, lint, `format:check`, 372 testes unitários, 17 E2E, build      |
+| Suíte local                                        | typecheck, lint, `format:check`, 373 testes unitários, 17 E2E, build      |
 | Dead letters                                       | os mesmos 8 eventos de sondagem da 7A.1, sem reprocessamento nem exclusão |
 | Migrações                                          | 27 → 28; `db advisors` sem achado novo de `pg_cron`/`pg_net`/Vault        |
 | Auth remoto (allowlist de redirecionamento)        | `additional_redirect_urls` com a URL da Render; `config diff` = 0         |
