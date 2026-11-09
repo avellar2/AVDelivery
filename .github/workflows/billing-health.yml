@@ -1,0 +1,150 @@
+name: Billing automation health
+
+# Financial health of the out-of-band billing jobs. The protected endpoint
+# answers 503 when the worker or the reconciliation is not doing its job and
+# 200 otherwise; the workflow turns that into exactly one issue per incident.
+#
+# Required repository configuration:
+#   variable BILLING_BASE_URL          https://<host> without trailing slash
+#   secret   BILLING_WORKER_SECRET     same 32-255 char secret as the jobs
+#   variable BILLING_DEAD_LETTER_BASELINE  known dead letters (default 8)
+#
+# Scheduled workflows only run from the default branch. A repository with no
+# activity for 60 days has its schedules disabled by GitHub; the runbook in
+# docs/billing-scheduler.md explains how to re-enable them.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: billing-health
+  cancel-in-progress: false
+
+env:
+  BILLING_BASE_URL: ${{ vars.BILLING_BASE_URL }}
+  BILLING_DEAD_LETTER_BASELINE: ${{ vars.BILLING_DEAD_LETTER_BASELINE || '8' }}
+
+jobs:
+  probe:
+    name: Probe billing health
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe the protected health endpoint
+        id: probe
+        continue-on-error: true
+        env:
+          BILLING_WORKER_SECRET: ${{ secrets.BILLING_WORKER_SECRET }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${BILLING_BASE_URL:-}" ]; then
+            echo "BILLING_BASE_URL is not configured." >&2
+            echo "state=unknown" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          body="$(mktemp)"
+          code="$(curl -sS --max-time 30 -o "$body" -w '%{http_code}' \
+            -H "Authorization: Bearer ${BILLING_WORKER_SECRET}" \
+            -H 'Accept: application/json' \
+            "${BILLING_BASE_URL%/}/api/internal/billing/health" || echo 000)"
+
+          state="$(jq -r '.status // "unknown"' "$body" 2>/dev/null || echo unknown)"
+          alerts="$(jq -r '(.alerts // []) | join(", ")' "$body" 2>/dev/null || echo unknown)"
+          dead_letter="$(jq -r '.deadLetter // 0' "$body" 2>/dev/null || echo 0)"
+          baseline="${BILLING_DEAD_LETTER_BASELINE:-8}"
+
+          {
+            echo "http_status=$code"
+            echo "state=$state"
+            echo "alerts=$alerts"
+            echo "dead_letter=$dead_letter"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "HTTP $code · status $state · dead letters $dead_letter/$baseline · alerts: ${alerts:-none}"
+
+          if [ "$code" != "200" ] || [ "$state" = "critical" ] || [ "$state" = "unknown" ]; then
+            exit 1
+          fi
+
+          if [ "$dead_letter" -gt "$baseline" ] 2>/dev/null; then
+            echo "Dead letters above the known baseline." >&2
+            exit 1
+          fi
+
+      - name: Open or refresh the incident issue
+        if: steps.probe.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HTTP_STATUS: ${{ steps.probe.outputs.http_status }}
+          STATE: ${{ steps.probe.outputs.state }}
+          ALERTS: ${{ steps.probe.outputs.alerts }}
+          DEAD_LETTER: ${{ steps.probe.outputs.dead_letter }}
+        run: |
+          set -euo pipefail
+
+          gh label create billing-alert \
+            --color B60205 \
+            --description "Automated billing automation alert" 2>/dev/null || true
+
+          host="$(printf '%s' "${BILLING_BASE_URL}" | sed -E 's#^https?://##; s#/.*$##')"
+          existing="$(gh issue list --label billing-alert --state open --json number --jq '.[0].number // empty')"
+
+          body="$(cat <<EOF
+          O monitor automático não confirmou a saúde do faturamento.
+
+          | Campo | Valor |
+          | --- | --- |
+          | Verificado em (UTC) | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
+          | Host | ${host:-não configurado} |
+          | HTTP | ${HTTP_STATUS:-desconhecido} |
+          | Status | ${STATE:-desconhecido} |
+          | Alertas | ${ALERTS:-nenhum} |
+          | Dead letters | ${DEAD_LETTER:-0} (baseline ${BILLING_DEAD_LETTER_BASELINE}) |
+
+          Nenhum payload, documento, valor, token ou chave é incluído neste alerta.
+          Runbook: docs/billing-scheduler.md e docs/homologation.md.
+          EOF
+          )"
+
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body "$body" >/dev/null
+            echo "Incident issue #$existing refreshed."
+          else
+            gh issue create \
+              --title "Faturamento: automação em estado crítico" \
+              --label billing-alert \
+              --assignee "${{ github.repository_owner }}" \
+              --body "$body"
+          fi
+
+      - name: Close the incident issue after recovery
+        if: steps.probe.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HTTP_STATUS: ${{ steps.probe.outputs.http_status }}
+          STATE: ${{ steps.probe.outputs.state }}
+        run: |
+          set -euo pipefail
+
+          existing="$(gh issue list --label billing-alert --state open --json number --jq '.[0].number // empty')"
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" \
+              --body "Recuperado em $(date -u +%Y-%m-%dT%H:%M:%SZ): HTTP ${HTTP_STATUS}, status ${STATE}. Fechando automaticamente."
+            gh issue close "$existing" --reason completed
+            echo "Incident issue #$existing closed."
+          fi
+
+      - name: Fail the run when the automation is unhealthy
+        if: steps.probe.outcome == 'failure'
+        run: exit 1
