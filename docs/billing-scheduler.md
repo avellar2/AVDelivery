@@ -109,17 +109,21 @@ limites e o motivo de não servir para produção estão em
 
 ## Alertas externos
 
-1. **GitHub Actions** — `.github/workflows/billing-health.yml`, a cada 10 minutos, consulta
-   `/api/internal/billing/health` com o segredo. Abre uma issue `billing-alert` por incidente,
-   atualiza em vez de duplicar e fecha na recuperação. Exige as configurações de repositório
-   `vars.BILLING_BASE_URL`, `vars.BILLING_DEAD_LETTER_BASELINE` e
+1. **GitHub Actions** — `.github/workflows/billing-health.yml`, a cada 10 minutos
+   (`7,17,27,37,47,57`, fora do topo da hora porque o GitHub atrasa e pode descartar execuções
+   agendadas nos horários de pico), consulta `/api/internal/billing/health` com o segredo. Abre uma
+   issue `billing-alert` por incidente, atualiza em vez de duplicar e fecha na recuperação. Exige as
+   configurações de repositório `vars.BILLING_BASE_URL`, `vars.BILLING_DEAD_LETTER_BASELINE` e
    `secrets.BILLING_WORKER_SECRET`.
 2. **UptimeRobot Free** — monitor de disponibilidade a cada 5 minutos em `/api/health` (público, sem
    credencial, sem dado interno), com alerta por e-mail.
 
 O workflow só executa agendado a partir da branch padrão. O GitHub desativa `schedule` após 60 dias
 sem atividade no repositório; nesse caso faça um commit ou dispare `workflow_dispatch` uma vez para
-reativar.
+reativar. Em 2026-11-09 a primeira execução agendada não ocorreu nas duas primeiras horas após o
+merge, apesar do workflow ativo na branch padrão; o cron foi movido para minutos fora do topo da hora
+e um commit foi enviado ao `master` (o push na branch padrão também força o re-registro do
+agendamento).
 
 ## Script local (somente diagnóstico)
 
