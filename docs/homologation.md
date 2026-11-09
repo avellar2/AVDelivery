@@ -14,11 +14,14 @@ o agendador (worker a cada minuto, conciliação a cada 15 minutos) e comprovou 
 Asaas Sandbox, processamento automático, concorrência, recuperação de lease e de backlog. Permanece
 **parcial** porque a URL do túnel é efêmera e não existe alerta externo configurado.
 
-A **Etapa 7A.2**, também em 2026-11-05, entregou a rota `/api/internal/billing/health` para monitor
-externo (JSON sem PII, `503` em estado crítico, `401` sem segredo), comprovou o `503` com o agendador
-parado e a recuperação automática ao religá-lo, e levantou os preços das opções reais de hospedagem.
-Continua **parcial e bloqueada**: contratar a hospedagem estável custa cerca de US$ 20/mês e depende
-de autorização; até lá tudo roda no computador do usuário, atrás de túnel efêmero.
+A **Etapa 7A.2** começou em 2026-11-05 com a rota `/api/internal/billing/health` (JSON sem PII, `503`
+em estado crítico, `401` sem segredo) e o levantamento de preços de hospedagem. Em **2026-11-09** a
+operação saiu do computador do usuário com **custo mensal zero**: Render Free em HTTPS estável,
+Supabase Cron (`pg_cron` + `pg_net`) lendo os segredos do Vault, worker a cada minuto, conciliação a
+cada 15 minutos, webhook do Asaas Sandbox na URL fixa e dois monitores externos. A etapa continua
+**parcial** porque o UptimeRobot depende da ativação por e-mail do responsável e a execução
+`schedule` do GitHub Actions ainda não foi observada; além disso, o plano gratuito não tem SLA e não
+serve para produção.
 
 As Etapas 3, 4 e 5 foram validadas contra o projeto Supabase real de homologação, com migrações
 aplicadas, integração, E2E e revisão visual em desktop e mobile. Na Etapa 5, o GPS web em primeiro
@@ -1342,91 +1345,142 @@ npm run billing:schedule -- --base-url https://SEU-DOMINIO
 O script `scripts/billing-scheduler.mjs` exige `BILLING_WORKER_SECRET` (ou `CRON_SECRET`) com 32 a
 255 caracteres e só aceita HTTPS fora de localhost.
 
-## Etapa 7A.2 — hospedagem estável, agendamento permanente e alertas (2026-11-05)
+## Etapa 7A.2 — hospedagem estável, cron permanente e alertas (2026-11-05 → 2026-11-09)
 
 Objetivo: eliminar a dependência do computador do usuário e do túnel efêmero, obter HTTPS estável,
 agendamento permanente e monitoramento de falhas com alerta externo.
 
-**Status: PARCIAL — bloqueada por autorização de contratação.** Nenhum serviço foi contratado, nenhum
-domínio foi comprado e nenhum custo recorrente foi assumido. O que não dependia de autorização foi
-entregue e validado: a rota de saúde para monitor externo, o levantamento verificado de preços e a
-validação completa (typecheck, lint, format, 368 testes unitários, 17 E2E, build, migrações e
-advisors).
+**Status: HOMOLOGAÇÃO PARCIAL.** A operação saiu do PC do usuário e do túnel efêmero em 2026-11-09,
+com **custo mensal zero**: Render Free (HTTPS estável), Supabase Cron (`pg_cron` + `pg_net`) lendo os
+segredos do Vault, worker a cada minuto, conciliação a cada 15 minutos, webhook do Asaas Sandbox na
+URL fixa e dois monitores externos. Continua parcial porque o **UptimeRobot depende do clique de
+ativação no e-mail do responsável** e a **execução `schedule` do GitHub Actions ainda não foi
+observada**; além disso, o plano gratuito não tem SLA e não serve para produção.
 
-### Auditoria de infraestrutura e segredos
+Nada foi contratado, nenhum domínio foi comprado e nenhum custo recorrente foi assumido.
 
-| Verificação                                                             | Resultado                                                                             |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Conta/projeto de hospedagem autorizado                                  | **Não existe.** Sem conta Vercel, sem CLI `vercel`, sem token, sem `gh`               |
-| Credenciais de túnel nomeado (`~/.cloudflared`)                         | Ausentes — só o binário do túnel rápido (efêmero)                                     |
-| Outras plataformas (Netlify, Fly, Railway, Render, AWS, GCP, Azure, DO) | Nenhuma CLI, conta ou variável de ambiente configurada                                |
-| Segredos no repositório                                                 | Nenhum. `.env.local` ignorado; `.env.example` só com nomes                            |
-| Segredos em logs/respostas                                              | Rotas devolvem JSON sanitizado; chamadas de teste nunca imprimiram o valor do segredo |
-| Migrações aplicadas                                                     | 0 novas nesta etapa; nenhum `db reset` remoto                                         |
+### Decisão e custo
 
-### Opções de hospedagem comparadas (preços verificados em 2026-11-05)
+| Componente      | Escolha                                               | Custo     |
+| --------------- | ----------------------------------------------------- | --------- |
+| Hospedagem      | Render Free, `avdelivery-homolog`, região Oregon      | US$ 0/mês |
+| Agendador       | Supabase Cron (`pg_cron` + `pg_net`) no projeto atual | US$ 0     |
+| Alertas         | GitHub Actions (agendado) + UptimeRobot Free          | US$ 0     |
+| Banco/Auth      | projeto Supabase de homologação já existente          | US$ 0     |
+| Domínio próprio | não comprado — URL `*.onrender.com`                   | —         |
 
-| Opção                                  | Cron / cadência                                                                  | HTTPS e domínio                                              | Custo                                                                         | Situação                       |
-| -------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------- | ------------------------------ |
-| **Vercel Pro** (recomendada)           | cron por minuto e por projeto (100 jobs); precisão de minuto                     | HTTPS automático; 1 domínio grátis no 1º ano em TLD elegível | **US$ 20/mês** de taxa de plataforma, 1 assento, com US$ 20 de crédito mensal | Requer autorização             |
-| Vercel Hobby                           | **1 execução por dia**, precisão por hora — expressão por minuto falha no deploy | HTTPS em `*.vercel.app`                                      | gratuito                                                                      | Não atende à cadência          |
-| Supabase Cron (`pg_cron` + `pg_net`)   | 1 min / 15 min, sem custo adicional sobre o projeto Supabase                     | **não hospeda** — só chama um endpoint HTTPS externo         | incluído no projeto; segredo no Vault                                         | Só serve combinado com um host |
-| Túnel rápido (cloudflared)             | depende do PC do usuário                                                         | URL aleatória, sem SLA, muda a cada execução                 | gratuito                                                                      | **Não é hospedagem**           |
-| Túnel nomeado (Cloudflare)             | depende de um host rodando                                                       | exige conta Cloudflare + domínio no Cloudflare               | requer conta e domínio; não cotado                                            | Requer autorização             |
-| VPS/cron próprio, Railway, Render, Fly | cadência livre                                                                   | HTTPS/domínio a configurar                                   | não cotado nesta etapa                                                        | Não avaliado                   |
+### Hospedagem publicada (Render Free)
 
-Observações que pesam na recomendação:
+- URL estável: `https://avdelivery-homolog.onrender.com`
+- Serviço `srv-dbotns95efls73evss5g`, `runtime: node`, `plan: free`, região Oregon, branch
+  `feat/stage-7a-billing-reliability`, build `npm ci && npm run build`, start `npm run start`.
+- `render.yaml` versiona o blueprint com `autoDeployTrigger: off`; o deploy é disparado por commit
+  explícito (`render deploys create --commit`) para não publicar trabalho em andamento.
+- HTTPS terminado na borda da Render/Cloudflare; `NEXT_PUBLIC_SITE_URL` aponta para a URL pública.
+- Health check da plataforma em `/api/health` (resposta `{"status":"ok"}`, `Cache-Control: no-store`,
+  sem dados internos).
+- Variáveis sensíveis (`SUPABASE_SERVICE_ROLE_KEY`, `ASAAS_API_KEY`, `ASAAS_WEBHOOK_TOKEN`,
+  `BILLING_WORKER_SECRET`) foram gravadas direto no ambiente protegido da Render a partir de
+  `.env.local`, com guarda que recusa publicar se `ASAAS_ENVIRONMENT` não for `sandbox`. Nenhum valor
+  passou por Git, SQL versionado ou log.
+- Limites do plano gratuito: 512 MB, 750 horas/mês, suspensão após 15 minutos sem tráfego e nenhum
+  SLA. O worker a cada minuto mantém a instância acordada; para produção é necessário plano pago ou
+  outro host.
 
-- A cobrança é Pix de R$ 59,90/mês por loja; os US$ 20/mês da Vercel Pro são o único custo recorrente
-  novo identificado para tirar a operação do PC do usuário, e a taxa inclui US$ 20 de crédito de uso.
-- O worker a cada minuto custa ~43.200 invocações/mês e a conciliação ~2.880/mês; ambas consomem do
-  crédito incluído, mas o custo de função deve ser conferido em produção.
-- Sem hospedagem estável, ativar `pg_cron`/`pg_net` não resolve: não há URL fixa para chamar.
-- Não foi escolhida a opção mais cara: a comparação ficou restrita ao tier mínimo que atende à
-  cadência de 1 minuto exigida pelo worker.
+### Cron permanente (Supabase Cron + Vault)
 
-**Bloqueio exato:** contratar a hospedagem exige conta paga, cartão e custo recorrente de
-aproximadamente US$ 20/mês — decisão que a etapa não pode tomar sozinha. Até a autorização, a
-operação continua dependendo do PC do usuário, o que mantém a homologação **parcial** por definição.
+Migração `20261109120000_billing_cron_scheduler.sql` (28ª aplicada, sem `db reset` remoto):
 
-### Entregue nesta etapa: rota de saúde para monitor externo
+- habilita `pg_cron` (1.6.4) e `pg_net` (0.20.4);
+- cria `private.billing_cron_post(route_path)`, `security definer`, `search_path = ''`, revogada de
+  `public`/`anon`/`authenticated`, que lê `billing_base_url` e `billing_worker_secret` do
+  `vault.decrypted_secrets` e chama `net.http_post` com `Authorization: Bearer`;
+- agenda `billing-worker` (`* * * * *`) e `billing-reconcile` (`*/15 * * * *`), ids 2 e 3.
 
-`src/modules/billing/job-health.ts` + `src/app/api/internal/billing/health/route.ts`:
+O `supabase/config.toml` ganhou `[db.vault]` com `env(BILLING_BASE_URL)` e
+`env(BILLING_WORKER_SECRET)`: o `db push` cria/atualiza as entradas do Vault, e **nenhum segredo
+aparece no SQL versionado**. O agendador local (`npm run billing:schedule`) foi desligado; não há
+processo Node escutando em `:3000`/`:3100` nem tarefa agendada do Windows.
 
-- `GET`/`POST` protegidos pelo mesmo segredo dedicado das rotas de trabalho (32–255 caracteres,
-  comparação em tempo constante, falha fechada);
-- devolve contadores, carimbos de tempo e o erro sanitizado da última execução — **sem** payload,
-  documento, valor, token ou chave;
-- `200` em `ok`/`warning` (só dead letter), **`503` quando qualquer alerta for crítico**, `401` sem
-  segredo e `503` se o segredo não estiver configurado ou a leitura falhar;
-- alertas: `worker_not_running` (>10 min), `worker_last_failed`, `reconciliation_not_running` (>2 h),
-  `reconciliation_last_failed`, `pending_backlog` (>5 min), `stale_processing`, `dead_letter`;
-- 16 testes unitários novos cobrindo cada regra, a autorização e a falha fechada.
+### Webhook do Asaas na URL fixa
 
-Sem essa rota, um monitor de uptime não teria como detectar que o faturamento parou: `/admin/billing`
-exige sessão de superadministrador e um navegador.
+O webhook segue em `https://avdelivery-homolog.onrender.com/api/webhooks/asaas`, com
+`asaas-access-token`, mantendo `NON_SEQUENTIALLY` para preservar a ordem por recurso. Entrega externa
+real comprovada em 2026-11-09: `PAYMENT_UPDATED` recebido às 14:58:55 UTC e processado pelo worker às
+14:59:01; reenvio do mesmo evento recebido às 15:01:12 e processado às 15:02:01, sem duplicar efeito
+financeiro (uma única linha de fatura, `status`/`paid_at` inalterados).
 
-### Evidências da 7A.2 (ambiente da 7A.1 ainda publicado por túnel)
+### Defeito encontrado e corrigido na publicação
 
-| Verificação                               | Resultado                                                                                       |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Rota de saúde sem credencial (pelo túnel) | `401 {"ok":false,"error":"unauthorized"}`                                                       |
-| Rota de saúde com credencial (pelo túnel) | `200` com `status: "warning"` e `alerts: ["dead_letter"]` (os 8 da 7A.1)                        |
-| Agendador parado por ~15 min              | `503` às 19:53:15 UTC com `status: "critical"` e `alerts: ["dead_letter","worker_not_running"]` |
-| Agendador religado                        | worker executou às 19:54:06 UTC e a rota voltou a `200` em 19:54:30, sem intervenção            |
-| Agendador duplicado                       | duas instâncias do script rodaram juntas sem processamento duplicado (claim atômico)            |
-| Suíte completa                            | typecheck, lint, `format:check`, 368 testes unitários (35 arquivos), 17 E2E, build              |
-| Build                                     | inclui `/api/internal/billing/health` como rota dinâmica                                        |
+O E2E remoto reprovou dois fluxos com `ERR_CONNECTION_REFUSED`. A causa não era a instância gratuita:
+`/auth/signout` e `/auth/confirm` montavam o redirecionamento como
+`new URL(path, request.url)`, e atrás do proxy da Render `request.url` tem origem
+`https://localhost:10000`. O navegador era enviado para `https://localhost:10000/...`, que não existe.
+Correção: `src/lib/redirect-response.ts` responde com `Location` **relativo** (como o middleware já
+fazia), sem depender de `Host`/`X-Forwarded-*`, mais 4 testes unitários de regressão. Depois do
+deploy do commit `a58ca0c`, o E2E remoto passou 5/5.
+
+### Monitoramento e alertas
+
+**GitHub Actions** (`.github/workflows/billing-health.yml`, ativo na branch padrão desde o merge do
+PR #3, 16:36 UTC):
+
+- roda a cada 10 minutos (`schedule`) e sob demanda; consulta `/api/internal/billing/health` com o
+  segredo em `secrets.BILLING_WORKER_SECRET` e a URL em `vars.BILLING_BASE_URL`;
+- reprova com HTTP diferente de `200`, `status` `critical`/`unknown` ou dead letters acima da linha
+  de base conhecida (`8`);
+- abre **uma issue por incidente** (`billing-alert`), atualiza a existente em vez de criar spam,
+  comenta e fecha na recuperação; o corpo é sanitizado (host, HTTP, estado, alertas e contadores),
+  sem payload, documento ou credencial.
+
+Evidência com disparo manual: execução `42656692582` saudável (`200`, `warning`, 8/8 dead letters);
+execução `42658748288` em 16:50:12 falhou e abriu a issue #4 às 16:50:21 (atribuída ao responsável);
+execução `42659100291` em 16:52:24 comentou e fechou a issue às 16:52:33. **A execução agendada
+(`event: schedule`) ainda não foi observada** — as três execuções acima são `workflow_dispatch`.
+
+**UptimeRobot Free**: monitor submetido pelo fluxo agêntico (desafio proof-of-work) para
+`/api/health`, checagem a cada 5 minutos, alerta por e-mail, sem header, sem credencial e sem dado
+financeiro na resposta pública. **Pendente do clique de ativação no e-mail enviado ao responsável**;
+até lá não existe conta/API key para conferir o estado do monitor.
+
+### Evidências (2026-11-09, todas contra a URL publicada)
+
+| Verificação                                        | Resultado                                                                 |
+| -------------------------------------------------- | ------------------------------------------------------------------------- |
+| Deploy do commit `a58ca0c`                         | `live`; `/api/health` `200 {"status":"ok"}`                               |
+| Worker pelo cron (sem agendador local)             | execuções a cada minuto, ex. 17:11:01 e 17:12:00 UTC, `succeeded`         |
+| Conciliação pelo cron                              | 15:45, 16:00, 16:15, 16:30, 16:45 e 17:00 UTC, `succeeded`, 4 conciliadas |
+| Divergências na conciliação                        | 0 em todas as execuções observadas                                        |
+| `/api/internal/billing/health` sem segredo         | `401 {"ok":false,"error":"unauthorized"}`                                 |
+| `/api/internal/billing/health` com segredo         | `200`, `status: "warning"`, `alerts: ["dead_letter"]`, `deadLetter: 8`    |
+| `/api/internal/billing/worker` e webhook sem chave | `401`                                                                     |
+| E2E remoto de homologação                          | 5/5 (login, isolamento A/B, superadmin, páginas públicas, recuperação)    |
+| Suíte local                                        | typecheck, lint, `format:check`, 372 testes unitários, 17 E2E, build      |
+| Dead letters                                       | os mesmos 8 eventos de sondagem da 7A.1, sem reprocessamento nem exclusão |
+| Migrações                                          | 27 → 28; `db advisors` sem achado novo de `pg_cron`/`pg_net`/Vault        |
+
+### Segurança
+
+- Segredos só no ambiente protegido da Render e no Vault; `config.toml` referencia variáveis, não
+  valores; `.env.local` continua ignorado.
+- Rotas internas e de saúde falham fechado (`401`/`503`) e comparam o segredo em tempo constante.
+- O webhook continua exigindo `asaas-access-token`; sem token responde `401 invalid_token`.
+- RLS permanece habilitada nas tabelas financeiras; o worker usa a `service_role` apenas do lado
+  servidor.
+- A resposta pública de saúde (`/api/health`) não expõe banco, configuração, contadores ou
+  credenciais.
+- Redirecionamentos de autenticação usam `Location` relativo — imune a `Host` forjado e a proxy.
 
 ### O que continua pendente (7A.2)
 
-- [ ] Hospedagem estável autorizada e contratada (Vercel Pro ou equivalente) com deploy por Git.
-- [ ] Cron permanente nessa hospedagem: worker a cada minuto e conciliação a cada 15 minutos.
-- [ ] Monitor externo apontado para `/api/internal/billing/health` com o header `Authorization` e
-      alerta em resposta diferente de `200` (ou em `status != "ok"` para cobrir dead letter).
-- [ ] Rotação dos segredos antes de qualquer uso real.
+- [ ] Ativar o UptimeRobot pelo e-mail e comprovar falha → notificação → recuperação.
+- [ ] Observar e registrar uma execução `schedule` do GitHub Actions (a cadência é desativada pelo
+      GitHub após 60 dias sem atividade no repositório).
+- [ ] Rotação de `BILLING_WORKER_SECRET`, `ASAAS_WEBHOOK_TOKEN` e chaves do Supabase antes de
+      qualquer uso real.
+- [ ] Domínio próprio, plano com SLA e limites de produção (a Render Free é só homologação).
 
-**Conclusão: ETAPA 7A.2 PARCIAL.** A parte independente de contratação foi concluída e provada
-(rota de saúde, preços verificados, suíte verde), mas **hospedagem estável, cron permanente e alerta
-externo dependem de autorização de custo** e não existem hoje. O ciclo automático continua rodando
-apenas enquanto o PC do usuário estiver ligado e o túnel ativo.
+**Conclusão: ETAPA 7A.2 PARCIAL.** Hospedagem estável, cron permanente e o primeiro monitor externo
+foram entregues e comprovados com evidência real. Os dois critérios de encerramento ainda abertos são
+a ativação do UptimeRobot e a prova da execução agendada do GitHub Actions; por isso a etapa **não**
+é declarada homologada.

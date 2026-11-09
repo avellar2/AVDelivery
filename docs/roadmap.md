@@ -244,16 +244,16 @@ cobrança e contratação/aceite de contrato. Worker e conciliação automática
 Critério de pronto: **atendido no Asaas Sandbox** — ciclo externo completo comprovado de ponta a
 ponta. Produção continua explicitamente fora do escopo desta etapa.
 
-## Etapa 7A — Hardening financeiro, webhooks e resiliência (homologação parcial em 2026-11-05)
+## Etapa 7A — Hardening financeiro, webhooks e resiliência (homologação parcial em 2026-11-09)
 
-> **Homologação operacional parcial** (2026-11-05). Inbox durável, ACK `200`, processador fora do
+> **Homologação operacional parcial** (2026-11-09). Inbox durável, ACK `200`, processador fora do
 > ciclo HTTP, leases, recuperação de processo morto, retry com backoff, dead letter, conciliação
 > automática, job runs e diagnóstico de saúde foram implementados e exercitados contra o Supabase de
-> homologação. Na **Etapa 7A.1** o app foi publicado por túnel HTTPS e o agendador rodou de verdade:
-> nova entrega externa do Asaas, processamento automático, concorrência, recuperação de lease e de
-> backlog foram comprovados. Na **Etapa 7A.2** foi entregue a rota de saúde para monitor externo e
-> levantado o custo real de hospedagem estável; a contratação depende de autorização do responsável
-> pelo projeto. Permanece parcial porque a URL é efêmera e não há alerta externo. Ver
+> homologação. Na **Etapa 7A.1** o app foi publicado por túnel HTTPS e o agendador rodou de verdade. Na
+> **Etapa 7A.2** a operação saiu do computador do usuário com custo zero: Render Free em URL estável,
+> Supabase Cron (`pg_cron` + `pg_net`) com segredos no Vault, worker a cada minuto, conciliação a cada
+> 15 minutos, webhook do Asaas Sandbox e monitores externos. Permanece parcial porque o UptimeRobot
+> aguarda ativação por e-mail e a execução agendada do GitHub Actions ainda não foi observada. Ver
 > [homologation.md](homologation.md) e [billing-scheduler.md](billing-scheduler.md).
 
 Entregue:
@@ -280,11 +280,14 @@ Entregue:
       permissões e ausência de PII.
 - [x] Rota `/api/internal/billing/health` para monitor externo: JSON sem PII, `503` em estado
       crítico, `200` em `ok`/aviso, com 16 testes unitários de decisão e de autorização.
-- [ ] URL HTTPS **estável** (Vercel, domínio próprio ou túnel nomeado) com execução contínua —
-      bloqueada por falta de conta/plano autorizado (ver orçamento em
-      [homologation.md](homologation.md)).
-- [ ] Alerta externo (e-mail/Slack/APM) para falha de worker, dead letter e divergência — a rota de
-      saúde é o insumo; falta o canal autorizado.
+- [x] URL HTTPS **estável** em `https://avdelivery-homolog.onrender.com` (Render Free), com deploy
+      por commit e HTTPS de borda.
+- [x] Cron permanente no Supabase (`pg_cron` + `pg_net`), segredos no Vault, worker a cada minuto e
+      conciliação a cada 15 minutos comprovados sem agendador local.
+- [x] Canal de alerta externo configurado: workflow do GitHub Actions em `.github/workflows`
+      (branch padrão) com uma issue por incidente, e monitor UptimeRobot para `/api/health`.
+- [ ] Comprovar a execução `schedule` do GitHub Actions e concluir a ativação do UptimeRobot por
+      e-mail — sem isso a etapa continua declarada parcial.
 
 Fora do escopo da 7A: produção, cartão, nota fiscal, MFA/auditoria administrativa ampla, rate limit
 distribuído, CSP e observabilidade externa. A Etapa 7B não foi iniciada.

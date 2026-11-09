@@ -499,6 +499,15 @@ número sequencial.
 - O script de bootstrap recusa `service_role` igual à chave anônima.
 - A aplicação também falha fechada se `SUPABASE_SERVICE_ROLE_KEY == NEXT_PUBLIC_SUPABASE_ANON_KEY`,
   exibindo o aviso de ambiente não configurado em vez de operar com privilégio excessivo.
+- **Hospedagem (7A.2).** Os segredos de runtime vivem no ambiente protegido da Render, gravados por
+  CLI a partir de `.env.local`; o `render.yaml` versionado só declara nomes com `sync: false`. Um
+  guarda recusa o deploy se `ASAAS_ENVIRONMENT` não for `sandbox`.
+- **Agendador (7A.2).** `BILLING_BASE_URL` e `BILLING_WORKER_SECRET` ficam no Supabase Vault. O
+  `config.toml` usa `env(BILLING_BASE_URL)`/`env(BILLING_WORKER_SECRET)` e o SQL versionado da
+  migração lê `vault.decrypted_secrets` em tempo de execução — nenhum valor secreto aparece em Git,
+  SQL, log ou `/admin/billing`.
+- Rotação documentada em [billing-scheduler.md](billing-scheduler.md): gerar novo segredo, atualizar
+  Render, `db push` (Vault) e `secrets.BILLING_WORKER_SECRET` do GitHub.
 
 ## Cookie de loja ativa
 
@@ -524,6 +533,12 @@ número sequencial.
 - fallback para `/dashboard`.
 
 Usado no login (`next`) e na confirmação de e-mail.
+
+O destino é enviado como `Location` **relativo** (`redirectToPath` em `src/lib/redirect-response.ts`).
+Construir a URL a partir de `request.url` funciona no `next dev`, mas atrás de proxy a origem visível
+ao servidor é a interna (`https://localhost:10000` na Render) e o navegador terminava com
+`ERR_CONNECTION_REFUSED`. O `Location` relativo mantém mesma origem, dispensa `Host`/`X-Forwarded-*` e
+fecha a porta para redirecionamento baseado em cabeçalho forjado.
 
 ## Cabeçalhos e superfície HTTP
 
@@ -607,10 +622,10 @@ endereços nunca são logados.
 25. **Isenção e trial são regras comerciais** — um superadministrador pode ativar ou isentar
     manualmente, sempre com evento auditável. O trial não é renovável automaticamente e não há
     prevenção de abuso por múltiplas lojas na mesma organização nesta etapa.
-26. **Agendador não está ativo por padrão** — o worker e a conciliação têm rotas protegidas, leases,
-    retry e dead letter, mas dependem de um cron externo configurado após o deploy. Sem ele, eventos
-    ficam pendentes e o diagnóstico acusa `worker_not_running`. Reprocessar um `dead_letter` exige
-    revisão e reabertura manual; não há botão nem retry automático de falha permanente.
+26. **Agendador ativo apenas no ambiente de homologação** — desde 2026-11-09 o worker e a conciliação
+    rodam pelo Supabase Cron (`pg_cron` + `pg_net`) com segredos no Vault. Em outro ambiente é preciso
+    habilitar as extensões, provisionar o Vault e reaplicar a migração. Reprocessar um `dead_letter`
+    exige revisão e reabertura manual; não há botão nem retry automático de falha permanente.
 27. **Sem rate limit distribuído no webhook** — a proteção é token forte, limite de corpo, dedupe e
     consulta ao provedor. Um atacante que conheça o endpoint ainda pode gerar requisições inválidas;
     não há CAPTCHA (não aplicável a webhook) nem bloqueio por IP nesta etapa.
@@ -618,21 +633,22 @@ endereços nunca são logados.
     provedor. Não há política automática de retenção/anonimização; a remoção da loja cascateia os
     dados locais, mas obrigações futuras podem exigir retenção separada.
 29. **Homologação da Etapa 7A é operacional, mas ainda parcial** — worker, conciliação, leases,
-    recuperação, retry e dead letter foram exercitados contra o Supabase de homologação e, na Etapa
-    7A.1, também em ambiente publicado por túnel HTTPS com agendador real. A publicação foi
-    temporária (URL efêmera) e não há alerta externo. A homologação externa do Asaas (cobrança
-    Sandbox, confirmação simulada e webhook autenticado) foi concluída na Etapa 6B e repetida na
-    7A.1. Ver [billing-sandbox.md](billing-sandbox.md) e [homologation.md](homologation.md).
-30. **Exposição por túnel** — durante a 7A.1 a aplicação ficou acessível por uma URL pública
-    temporária. As rotas internas continuaram fechadas (401 sem segredo ou com segredo fora da faixa)
-    e o webhook exigiu `asaas-access-token`; nenhum dado de produção estava no processo. Um túnel não
-    substitui hospedagem com domínio próprio, TLS gerenciado e monitoramento.
-31. **Monitoramento depende de serviço externo autorizado** — a rota
-    `/api/internal/billing/health` da 7A.2 expõe apenas contadores, carimbos de tempo e o erro
-    sanitizado da última execução; não devolve documento, valor, payload, token nem chave, e exige o
-    mesmo segredo dedicado das rotas de trabalho. Ainda assim ela é um endpoint público: quem tiver o
-    segredo consegue observar a saúde da automação (não consegue alterar nada). Sem um monitor
-    contratado/autorizado não há notificação ativa — o `503` só produz efeito quando alguém o observa.
+    recuperação, retry e dead letter foram exercitados contra o Supabase de homologação. Na 7A.1 em
+    ambiente publicado por túnel HTTPS; na 7A.2, desde 2026-11-09, em URL estável na Render Free com
+    Supabase Cron. A homologação externa do Asaas (cobrança Sandbox, confirmação simulada e webhook
+    autenticado) foi concluída na Etapa 6B e repetida na 7A.1 e na 7A.2. Ver
+    [billing-sandbox.md](billing-sandbox.md) e [homologation.md](homologation.md).
+30. **Hospedagem gratuita sem SLA** — a aplicação fica pública em `*.onrender.com`, na Render Free:
+    512 MB, 750 h/mês, suspensão após 15 min sem tráfego e nenhum suporte. As rotas internas seguem
+    fechadas (`401` sem segredo) e o webhook exige `asaas-access-token`; nenhum dado de produção
+    existe nesse ambiente. Para produção são necessários domínio, plano com SLA e revisão da
+    configuração de Auth.
+31. **Monitoramento depende de serviços externos gratuitos** — `/api/internal/billing/health` expõe
+    apenas contadores, carimbos de tempo e o erro sanitizado da última execução (sem documento,
+    valor, payload, token ou chave) e exige o segredo dedicado; quem o tiver só consegue observar,
+    não alterar. O canal de alerta é o do GitHub Actions (issue) e o do UptimeRobot (e-mail). Ambos
+    são gratuitos, sem SLA, e o UptimeRobot ainda depende de ativação por e-mail; não há integração
+    com APM nem escalonamento automático.
 
 ## Checklist operacional
 
@@ -662,8 +678,11 @@ endereços nunca são logados.
       segredo fora da faixa; webhook rejeitou token inválido; entrega externa real processada fora do
       ciclo HTTP; duplicidade e evento fora de ordem sem efeito financeiro repetido.
 - [x] Etapa 7A.2: rota de saúde sem PII (`200` em `ok`/aviso, `503` em crítico, `401` sem segredo),
-      com testes de decisão e de autorização; orçamento de hospedagem estável levantado.
-- [ ] Hospedagem HTTPS estável com cron permanente e alerta externo de falha/dead letter/divergência.
+      com testes de decisão e de autorização; hospedagem HTTPS estável na Render Free, Supabase Cron
+      com segredos no Vault e monitores externos configurados.
+- [x] Redirecionamentos de autenticação com `Location` relativo, imunes ao host interno do proxy.
+- [ ] UptimeRobot ativado por e-mail e execução `schedule` do GitHub Actions observada.
+- [ ] Rotação dos segredos de homologação antes de qualquer uso real.
 - [ ] Revogação de permissão em tempo de execução e ciclo de reatribuição/conclusão no app.
 - [ ] Validar GPS físico e comportamento com tela bloqueada em Android e iOS.
 - [x] `service_role` usada apenas em scripts e em `src/lib/supabase/admin.ts` (server-only).

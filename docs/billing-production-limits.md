@@ -16,24 +16,24 @@ ativar cobrança real.
 
 ## Processamento
 
-- **Worker e conciliação existem, mas o agendador não está ativo por padrão.** As rotas
-  `/api/internal/billing/worker` e `/api/internal/billing/reconcile` são protegidas por segredo e
-  precisam ser chamadas por um cron externo (Vercel Cron, Supabase Cron/`pg_net` ou equivalente). O
-  `vercel.json` declara a cadência, mas só produz efeito após deploy e configuração de
-  `BILLING_WORKER_SECRET`/`CRON_SECRET`.
+- **Worker e conciliação estão ativos na homologação desde 2026-11-09.** As rotas
+  `/api/internal/billing/worker` e `/api/internal/billing/reconcile` são protegidas por segredo e são
+  chamadas pelo Supabase Cron (`pg_cron` + `pg_net`) a cada 1 e 15 minutos, com os segredos no Vault.
+  Em produção isso ainda depende de um projeto Supabase com cron habilitado e de um host sempre vivo.
 - O webhook **não** processa finanças na requisição: ele autentica, valida e persiste, respondendo
   `200` somente após a gravação. O Asaas só aceita `200` como ACK; `202` não é usado.
 - A inbox tem lease, recuperação de processo morto, backoff com jitter, limite de tentativas e
   `dead_letter` terminal. Reprocessar dead letter é manual.
 - A conciliação automática cobre pagamentos recentes e cobranças órfãs, mas examina no máximo 100
   assinaturas por execução e 100 pagamentos recentes; o que exceder o lote fica para a próxima.
-- Sem cron ativo, indisponibilidade ou perda de webhook deixam eventos pendentes; a página
-  `/admin/billing` acusa `worker_not_running`/`pending_backlog`.
-- **Não há alerta externo configurado.** A Etapa 7A.2 entregou `GET /api/internal/billing/health`
-  (JSON sem PII, `503` em estado crítico, `200` em `ok`/aviso) para que um monitor de uptime dispare a
-  notificação, mas nenhum monitor foi contratado/autorizado; o `503` só alerta quando alguém observa.
-- Não há alerta automático externo de falha de webhook, divergência de conciliação ou inadimplência;
-  o diagnóstico é uma tela administrativa mais a rota de saúde.
+- Com o cron ativo, indisponibilidade prolongada ou perda de webhook ainda deixam eventos pendentes
+  até a próxima execução; a página `/admin/billing` acusa `worker_not_running`/`pending_backlog`.
+- **Existe alerta externo, mas ainda não totalmente comprovado.** `GET /api/internal/billing/health`
+  devolve `503` em estado crítico e o workflow do GitHub Actions abre uma issue por incidente; o
+  monitor UptimeRobot vigia `/api/health` a cada 5 minutos. A execução agendada do GitHub Actions e a
+  ativação do UptimeRobot continuam pendentes de comprovação.
+- Não há alerta específico de falha de webhook, divergência de conciliação ou inadimplência: a saúde
+  agregada cobre worker, conciliação, backlog e dead letter, mas não o detalhe do provedor.
 - `billing_job_runs` usa a mesma tabela para as duas rotas; não há métrica exportada para
   Prometheus/APM nem tracing distribuído.
 - O tempo de execução é limitado a ~55 s por chamada (`maxDuration = 60`); lotes maiores dependem de
@@ -41,17 +41,16 @@ ativar cobrança real.
 
 ## Hospedagem e disponibilidade
 
-- **Não há hospedagem estável contratada.** A Etapa 7A.2 levantou as opções reais e os preços (ver
-  [homologation.md](homologation.md)) e registrou a pendência de autorização: contratar um plano,
-  assumir custo recorrente e comprar domínio dependem de decisão do responsável pelo projeto.
-- Enquanto isso, o processo roda no computador de desenvolvimento (`next start`) exposto por túnel
-  rápido: a URL muda, não há SLA, logs locais e o agendador morre com a máquina. Isso **não** é
-  hospedagem e não sustenta cobrança real.
-- A Vercel no plano gratuito não executa cron a cada minuto; a cadência de 1 minuto do worker exige o
-  plano Pro (US$ 20/mês por usuário, verificado em 2026-11) ou outro agendador equivalente. O mesmo
-  vale para conciliação a cada 15 minutos.
-- Sem domínio próprio não há TLS estável, e-mail transacional confiável nem URL fixa para o webhook do
-  Asaas — que precisa ser reconfigurado a cada troca de túnel.
+- **A homologação roda em plano gratuito, não em hospedagem de produção.** Render Free: 512 MB,
+  750 horas/mês, suspensão após 15 minutos sem tráfego e **nenhum SLA**; um único processo, sem
+  autoscaling, sem disco persistente e sem suporte. O worker a cada minuto mantém a instância
+  acordada, mas indisponibilidade da plataforma interrompe o faturamento.
+- **A URL é `*.onrender.com`, sem domínio próprio.** Serve para homologação e para o webhook do Asaas
+  Sandbox; para produção é preciso domínio, TLS próprio e e-mail transacional confiável.
+- Não há redundância: um único host, um único projeto Supabase e um único agendador. Se a Render ou o
+  Supabase caírem, a cobrança para até a recuperação.
+- A Vercel não é usada. O plano Hobby não executa cron por minuto e o Pro custa US$ 20/mês; o
+  `vercel.json` continua no repositório apenas como alternativa documentada.
 - Multiempresa em escala, múltiplas regiões, autoscaling, backup/PITR e plano de continuidade não
   foram avaliados; o Supabase de homologação é um projeto único na região West US.
 

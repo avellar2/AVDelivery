@@ -5,15 +5,18 @@ Comercialização por assinatura mensal por estabelecimento, sem comissão por p
 
 **Status atual: Etapas 1, 2, 3 e 4 homologadas; Etapa 5 com homologação parcial; Etapas 5B e 5C
 com aplicativo Android validado apenas em emulador; Etapa 6A implementada; Etapa 6B homologada no
-Asaas Sandbox (2026-11-04); Etapa 7A com homologação operacional parcial (2026-11-05), com produção
-não ativada** em projeto Supabase exclusivo de testes (2026-10-29 a 2026-11-05).
+Asaas Sandbox (2026-11-04); Etapa 7A com homologação operacional parcial (2026-11-09), com produção
+não ativada** em projeto Supabase exclusivo de testes (2026-10-29 a 2026-11-09).
 
-A Etapa 7A.1 publicou o aplicativo por HTTPS, ligou o agendador (worker a cada minuto, conciliação a
-cada 15 minutos) e comprovou entrega externa real do Asaas Sandbox, processamento automático,
-duplicidade idempotente, concorrência e recuperação de lease e de backlog. A Etapa 7A.2 acrescentou
-uma rota de saúde sem PII para monitor externo e comparou as opções reais de hospedagem estável; a
-etapa continua parcial porque a URL usada foi um túnel efêmero, não há hospedagem autorizada
-contratada e nenhum canal de alerta externo está configurado.
+A Etapa 7A.1 publicou o aplicativo por HTTPS, ligou o agendador e comprovou entrega externa real do
+Asaas Sandbox, processamento automático, duplicidade idempotente, concorrência e recuperação de lease
+e de backlog. A Etapa 7A.2 acrescentou a rota de saúde sem PII e, em 2026-11-09, tirou a operação do
+computador do usuário com **custo mensal zero**: Render Free em
+`https://avdelivery-homolog.onrender.com`, Supabase Cron (`pg_cron` + `pg_net`) com segredos no Vault,
+worker a cada minuto, conciliação a cada 15 minutos, webhook do Asaas Sandbox e dois monitores
+externos (GitHub Actions e UptimeRobot). A etapa continua parcial porque o UptimeRobot aguarda a
+ativação por e-mail e a execução agendada do GitHub Actions ainda não foi comprovada; o plano gratuito
+não tem SLA e não serve para produção.
 
 A plataforma entrega autenticação, isolamento multiempresa por RLS, painel do estabelecimento,
 superadministrador, cardápio digital com categorias/produtos/adicionais e imagens, página pública
@@ -27,8 +30,9 @@ administrativo, período de teste, carência e bloqueio de novas vendas sem aces
 6B adiciona cobrança recorrente via **Asaas Sandbox**: perfil de faturamento, cliente/assinatura/
 cobrança Pix, webhook autenticado, conciliação e tratamento de atraso/estorno/chargeback. A Etapa 7A
 separa o recebimento do processamento: webhook durável com ACK `200`, worker fora do ciclo HTTP com
-lease/retry/dead letter e conciliação automática protegida. O cron depende de configuração após o
-deploy. A loja só é liberada após um pagamento confirmado e verificado; criar a assinatura não libera.
+lease/retry/dead letter e conciliação automática protegida, agendados pelo Supabase Cron no ambiente
+publicado. A loja só é liberada após um pagamento confirmado e verificado; criar a assinatura não
+libera.
 Nenhuma cobrança real em dinheiro, contrato ou conta de produção foi criada; a homologação usou
 apenas o Sandbox do Asaas.
 
@@ -163,25 +167,26 @@ migrações. O bucket é público por desenho: não armazene dados privados nele
 
 ### 5. Variáveis de ambiente
 
-| Variável                        | Obrigatória | Uso                                                        |
-| ------------------------------- | ----------- | ---------------------------------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`      | sim         | URL do projeto Supabase                                    |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | sim         | Chave pública (browser/SSR)                                |
-| `SUPABASE_SERVICE_ROLE_KEY`     | scripts     | Bootstrap, seed, cobrança e conciliação (nunca no browser) |
-| `ASAAS_API_KEY`                 | cobrança    | Chave do **Sandbox**; produção é rejeitada                 |
-| `ASAAS_WEBHOOK_TOKEN`           | webhook     | Token do header `asaas-access-token` (32–255)              |
-| `ASAAS_ENVIRONMENT`             | opcional    | Deve ser `sandbox`                                         |
-| `ASAAS_BASE_URL`                | opcional    | Somente `https://api-sandbox.asaas.com/v3`                 |
-| `BILLING_WORKER_SECRET`         | worker      | Segredo das rotas internas (32–255); fallback abaixo       |
-| `CRON_SECRET`                   | worker      | Fallback do segredo; usado pela Vercel Cron                |
-| `BILLING_WORKER_*`              | opcional    | Lote, lease, tentativas e orçamento do processador         |
-| `BILLING_RECONCILE_*`           | opcional    | Lote, pagamentos recentes e orçamento da conciliação       |
-| `NEXT_PUBLIC_SITE_URL`          | recomendada | Origem usada nos links de autenticação                     |
-| `SUPERADMIN_EMAIL`              | bootstrap   | E-mail do superadministrador                               |
-| `SUPERADMIN_NAME`               | opcional    | Nome exibido                                               |
-| `SUPERADMIN_PASSWORD`           | criação     | Necessária se o usuário ainda não existir                  |
-| `DEMO_STORE_*` / `DEMO_OWNER_*` | seed        | Dados da loja de demonstração                              |
-| `SUPABASE_TEST_*`               | integração  | Projeto de teste local (nunca produção)                    |
+| Variável                        | Obrigatória | Uso                                                         |
+| ------------------------------- | ----------- | ----------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`      | sim         | URL do projeto Supabase                                     |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | sim         | Chave pública (browser/SSR)                                 |
+| `SUPABASE_SERVICE_ROLE_KEY`     | scripts     | Bootstrap, seed, cobrança e conciliação (nunca no browser)  |
+| `ASAAS_API_KEY`                 | cobrança    | Chave do **Sandbox**; produção é rejeitada                  |
+| `ASAAS_WEBHOOK_TOKEN`           | webhook     | Token do header `asaas-access-token` (32–255)               |
+| `ASAAS_ENVIRONMENT`             | opcional    | Deve ser `sandbox`                                          |
+| `ASAAS_BASE_URL`                | opcional    | Somente `https://api-sandbox.asaas.com/v3`                  |
+| `BILLING_WORKER_SECRET`         | worker      | Segredo das rotas internas (32–255); fallback abaixo        |
+| `CRON_SECRET`                   | worker      | Fallback do segredo (a Vercel usa esse nome quando adotada) |
+| `BILLING_BASE_URL`              | cron        | URL pública gravada no Supabase Vault pelo `db push`        |
+| `BILLING_WORKER_*`              | opcional    | Lote, lease, tentativas e orçamento do processador          |
+| `BILLING_RECONCILE_*`           | opcional    | Lote, pagamentos recentes e orçamento da conciliação        |
+| `NEXT_PUBLIC_SITE_URL`          | recomendada | Origem usada nos links de autenticação                      |
+| `SUPERADMIN_EMAIL`              | bootstrap   | E-mail do superadministrador                                |
+| `SUPERADMIN_NAME`               | opcional    | Nome exibido                                                |
+| `SUPERADMIN_PASSWORD`           | criação     | Necessária se o usuário ainda não existir                   |
+| `DEMO_STORE_*` / `DEMO_OWNER_*` | seed        | Dados da loja de demonstração                               |
+| `SUPABASE_TEST_*`               | integração  | Projeto de teste local (nunca produção)                     |
 
 As variáveis `NEXT_PUBLIC_*` são embutidas no build. Configure-as antes de `npm run build`.
 
@@ -535,15 +540,16 @@ Detalhes completos em [docs/security.md](docs/security.md).
 - Não há gestão de funcionários na interface (apenas o modelo e as políticas).
 - Cobrança somente em **Asaas Sandbox**, homologada de ponta a ponta em 2026-11-04 (cobrança Pix,
   confirmação simulada, webhook autenticado e liberação da loja). Não há ativação de produção.
-- A Etapa 7A adicionou inbox durável, worker, leases, retry, dead letter e conciliação automática, e
-  a 7A.1 comprovou o ciclo automático em ambiente publicado. Ainda assim o cron **não está ativo por
-  padrão**: é preciso configurar `BILLING_WORKER_SECRET`/`CRON_SECRET` e um agendador estável após o
-  deploy. Sem ele, o webhook só persiste e a loja não é liberada. Ver
-  [docs/billing-scheduler.md](docs/billing-scheduler.md).
-- Não há alerta externo (e-mail/Slack/APM) configurado para worker parado, dead letter ou divergência
-  de conciliação. A 7A.2 entregou `GET /api/internal/billing/health`, que devolve `503` em estado
-  crítico e `200` quando está tudo bem, para que um monitor de uptime dispare o alerta; falta apenas
-  contratar/autorizar o monitor. O diagnóstico humano continua em `/admin/billing`.
+- A Etapa 7A adicionou inbox durável, worker, leases, retry, dead letter e conciliação automática. No
+  ambiente de homologação eles rodam pelo Supabase Cron com segredos no Vault (worker a cada minuto,
+  conciliação a cada 15 minutos). Em outro ambiente é preciso habilitar `pg_cron`/`pg_net`,
+  provisionar o Vault e reaplicar a migração. Sem agendador, o webhook só persiste e a loja não é
+  liberada. Ver [docs/billing-scheduler.md](docs/billing-scheduler.md).
+- Os alertas externos usam serviços gratuitos: o workflow do GitHub Actions consulta
+  `/api/internal/billing/health` e abre uma issue por incidente; o UptimeRobot vigia `/api/health` a
+  cada 5 minutos. Nenhum dos dois tem SLA, a execução agendada do GitHub Actions ainda não foi
+  observada e o UptimeRobot aguarda a ativação por e-mail. O diagnóstico humano continua em
+  `/admin/billing`.
 - O webhook responde `200` somente após persistir (nunca `202`) e não processa finanças na requisição.
   Dead letters exigem revisão manual; não há envio externo de alerta.
 - Cobrança por Pix é pagamento por ciclo, **não débito automático**. Não há cartão, nota fiscal,
@@ -602,10 +608,10 @@ Detalhes completos em [docs/security.md](docs/security.md).
 As Etapas 1 a 4 estão homologadas, a Etapa 5 tem homologação web parcial, a Etapa 6A está
 implementada, a Etapa 6B está **homologada no Asaas Sandbox** e a Etapa 7A tem **homologação
 parcial** (produção não ativada). Antes de avançar, revisar
-[docs/billing-production-limits.md](docs/billing-production-limits.md), decidir a hospedagem estável
-(o orçamento levantado na 7A.2 está em [docs/homologation.md](docs/homologation.md)), ativar o cron do
-worker e da conciliação nessa URL, apontar um monitor externo para
-`/api/internal/billing/health` — e fazer a revisão deliberada da trava Sandbox-only. A Etapa 7
+[docs/billing-production-limits.md](docs/billing-production-limits.md), concluir a 7A.2 (ativar o
+UptimeRobot e comprovar a execução agendada do GitHub Actions, ver
+[docs/homologation.md](docs/homologation.md)), decidir a hospedagem de produção com SLA, rotacionar os
+segredos e fazer a revisão deliberada da trava Sandbox-only. A Etapa 7
 (endurecimento amplo) e a ativação de produção não foram iniciadas. A recomendação de gateway
 continua em [docs/billing-providers.md](docs/billing-providers.md).
 Antes de retomar rastreamento, recomenda-se validar o app Android em aparelho físico e decidir sobre
