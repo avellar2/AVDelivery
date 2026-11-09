@@ -15,7 +15,10 @@ name: Billing automation health
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # Minutes offset from the top of the hour on purpose. GitHub documents that
+    # scheduled runs are delayed (and may be dropped) during high load, and the
+    # peak is the start of every hour.
+    - cron: "7,17,27,37,47,57 * * * *"
   workflow_dispatch:
 
 permissions:
